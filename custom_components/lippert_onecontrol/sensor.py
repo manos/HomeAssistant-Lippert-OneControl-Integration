@@ -59,6 +59,7 @@ class OneControlTankSensor(CoordinatorEntity[OneControlCoordinator], SensorEntit
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_has_entity_name = False  # Use full name directly
+    _attr_suggested_display_precision = 0  # Show as whole percentage
 
     def __init__(
         self,
@@ -120,6 +121,7 @@ class OneControlBatteryVoltageSensor(CoordinatorEntity[OneControlCoordinator], S
     _attr_has_entity_name = True  # Append to device name
     _attr_name = "Battery Voltage"
     _attr_icon = "mdi:car-battery"
+    _attr_suggested_display_precision = 1  # Show as 12.8V
 
     def __init__(self, coordinator: OneControlCoordinator) -> None:
         """Initialize the battery voltage sensor."""
@@ -158,6 +160,7 @@ class OneControlGeneratorHoursSensor(CoordinatorEntity[OneControlCoordinator], S
     _attr_has_entity_name = True  # Append to device name
     _attr_name = "Hours"
     _attr_icon = "mdi:counter"
+    _attr_suggested_display_precision = 1  # Show as 168.3 hours
 
     def __init__(self, coordinator: OneControlCoordinator) -> None:
         """Initialize the generator hours sensor."""

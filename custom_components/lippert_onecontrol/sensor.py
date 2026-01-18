@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, KNOWN_TANKS
+from .const import DOMAIN, CONF_DISCOVERED_TANKS, get_suggested_area
 from .coordinator import OneControlCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,8 +30,10 @@ async def async_setup_entry(
 
     entities: list[SensorEntity] = []
 
-    # Tank sensors
-    for counter, info in KNOWN_TANKS.items():
+    # Tank sensors from discovered devices
+    discovered_tanks = entry.data.get(CONF_DISCOVERED_TANKS, {})
+    for counter_str, info in discovered_tanks.items():
+        counter = int(counter_str, 16) if isinstance(counter_str, str) else counter_str
         entities.append(
             OneControlTankSensor(
                 coordinator=coordinator,
@@ -41,13 +43,11 @@ async def async_setup_entry(
             )
         )
 
-    # Battery voltage sensor
+    # Battery voltage sensor (controller-level)
     entities.append(OneControlBatteryVoltageSensor(coordinator))
 
-    # Generator hours sensor
+    # Generator sensors (grouped under Generator device)
     entities.append(OneControlGeneratorHoursSensor(coordinator))
-
-    # Generator state sensor
     entities.append(OneControlGeneratorStateSensor(coordinator))
 
     async_add_entities(entities)
@@ -56,10 +56,9 @@ async def async_setup_entry(
 class OneControlTankSensor(CoordinatorEntity[OneControlCoordinator], SensorEntity):
     """Representation of a Lippert OneControl tank sensor."""
 
-    # Note: No device_class - tanks are not a standard HA device class
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_has_entity_name = True
+    _attr_has_entity_name = False  # Use full name directly
 
     def __init__(
         self,
@@ -71,28 +70,32 @@ class OneControlTankSensor(CoordinatorEntity[OneControlCoordinator], SensorEntit
         """Initialize the tank sensor."""
         super().__init__(coordinator)
         self._counter = counter
-        self._attr_name = name
         self._func_id = func_id
+
+        # Use the tank name directly (e.g., "Fresh Tank")
+        self._attr_name = name
 
         # Unique ID based on counter
         self._attr_unique_id = f"lippert_onecontrol_tank_{counter:02x}"
 
-        # Device info for grouping in HA
+        # Each tank gets its own device
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, "onecontrol_controller")},
-            "name": "Lippert OneControl",
+            "identifiers": {(DOMAIN, f"tank_{counter:02x}")},
+            "name": name,
             "manufacturer": "Lippert",
-            "model": "OneControl",
+            "model": "OneControl Tank Sensor",
+            "via_device": (DOMAIN, "onecontrol_controller"),
+            "suggested_area": get_suggested_area(name),
         }
 
         # Custom icon based on tank type
         if "fresh" in name.lower():
             self._attr_icon = "mdi:water"
-        elif "grey" in name.lower():
+        elif "grey" in name.lower() or "gray" in name.lower():
             self._attr_icon = "mdi:water-opacity"
         elif "black" in name.lower():
             self._attr_icon = "mdi:water-off"
-        elif "lp" in name.lower():
+        elif "lp" in name.lower() or "propane" in name.lower():
             self._attr_icon = "mdi:propane-tank"
 
     @property
@@ -114,7 +117,7 @@ class OneControlBatteryVoltageSensor(CoordinatorEntity[OneControlCoordinator], S
     _attr_device_class = SensorDeviceClass.VOLTAGE
     _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_has_entity_name = True
+    _attr_has_entity_name = True  # Append to device name
     _attr_name = "Battery Voltage"
     _attr_icon = "mdi:car-battery"
 
@@ -124,11 +127,13 @@ class OneControlBatteryVoltageSensor(CoordinatorEntity[OneControlCoordinator], S
 
         self._attr_unique_id = "lippert_onecontrol_battery_voltage"
 
+        # This stays under the main controller device
         self._attr_device_info = {
             "identifiers": {(DOMAIN, "onecontrol_controller")},
-            "name": "Lippert OneControl",
+            "name": "OneControl",
             "manufacturer": "Lippert",
-            "model": "OneControl",
+            "model": "OneControl Controller",
+            "suggested_area": "Utility",
         }
 
     @property
@@ -150,9 +155,9 @@ class OneControlGeneratorHoursSensor(CoordinatorEntity[OneControlCoordinator], S
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_native_unit_of_measurement = UnitOfTime.HOURS
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_has_entity_name = True
-    _attr_name = "Generator Hours"
-    _attr_icon = "mdi:engine"
+    _attr_has_entity_name = True  # Append to device name
+    _attr_name = "Hours"
+    _attr_icon = "mdi:counter"
 
     def __init__(self, coordinator: OneControlCoordinator) -> None:
         """Initialize the generator hours sensor."""
@@ -160,11 +165,14 @@ class OneControlGeneratorHoursSensor(CoordinatorEntity[OneControlCoordinator], S
 
         self._attr_unique_id = "lippert_onecontrol_generator_hours"
 
+        # Generator gets its own device
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, "onecontrol_controller")},
-            "name": "Lippert OneControl",
+            "identifiers": {(DOMAIN, "generator")},
+            "name": "Generator",
             "manufacturer": "Lippert",
-            "model": "OneControl",
+            "model": "Generator Genie",
+            "via_device": (DOMAIN, "onecontrol_controller"),
+            "suggested_area": "Utility",
         }
 
     @property
@@ -184,8 +192,8 @@ class OneControlGeneratorStateSensor(CoordinatorEntity[OneControlCoordinator], S
     """Representation of Lippert OneControl generator state sensor."""
 
     _attr_device_class = SensorDeviceClass.ENUM
-    _attr_has_entity_name = True
-    _attr_name = "Generator State"
+    _attr_has_entity_name = True  # Append to device name
+    _attr_name = "State"
     _attr_icon = "mdi:engine"
     _attr_options = ["Off", "Priming", "Starting", "Running", "Stopping", "Unknown"]
 
@@ -195,11 +203,14 @@ class OneControlGeneratorStateSensor(CoordinatorEntity[OneControlCoordinator], S
 
         self._attr_unique_id = "lippert_onecontrol_generator_state"
 
+        # Generator gets its own device (same as hours sensor)
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, "onecontrol_controller")},
-            "name": "Lippert OneControl",
+            "identifiers": {(DOMAIN, "generator")},
+            "name": "Generator",
             "manufacturer": "Lippert",
-            "model": "OneControl",
+            "model": "Generator Genie",
+            "via_device": (DOMAIN, "onecontrol_controller"),
+            "suggested_area": "Utility",
         }
 
     @property

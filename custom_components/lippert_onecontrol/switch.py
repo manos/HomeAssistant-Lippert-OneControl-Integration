@@ -36,8 +36,8 @@ class OneControlGeneratorSwitch(CoordinatorEntity[OneControlCoordinator], Switch
     """Representation of Lippert OneControl generator switch."""
 
     _attr_device_class = SwitchDeviceClass.SWITCH
-    _attr_has_entity_name = True
-    _attr_name = "Generator"
+    _attr_has_entity_name = True  # Append to device name
+    _attr_name = "Power"  # Will show as "Generator Power"
     _attr_icon = "mdi:engine"
 
     def __init__(self, coordinator: OneControlCoordinator) -> None:
@@ -46,11 +46,14 @@ class OneControlGeneratorSwitch(CoordinatorEntity[OneControlCoordinator], Switch
 
         self._attr_unique_id = "lippert_onecontrol_generator_switch"
 
+        # Generator gets its own device (shared with generator sensors)
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, "onecontrol_controller")},
-            "name": "Lippert OneControl",
+            "identifiers": {(DOMAIN, "generator")},
+            "name": "Generator",
             "manufacturer": "Lippert",
-            "model": "OneControl",
+            "model": "Generator Genie",
+            "via_device": (DOMAIN, "onecontrol_controller"),
+            "suggested_area": "Utility",
         }
 
     @property

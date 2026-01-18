@@ -503,3 +503,135 @@ class OneControlClient:
                     await writer.wait_closed()
                 except Exception:
                     pass
+
+    async def discover_devices(self, duration: float = 5.0) -> dict:
+        """
+        Discover all devices from controller broadcasts.
+        
+        Returns dict with:
+        - lights: {counter_hex: {"name": str, "func_id": int}}
+        - tanks: {counter_hex: {"name": str, "func_id": int}}
+        - has_generator: bool
+        
+        This discovers actual devices present in the RV, not just
+        all possible device types.
+        """
+        # Known function IDs from decompiled app
+        FUNCTION_NAMES = {
+            # Lights
+            32: "Kitchen Ceiling Light",
+            33: "Kitchen Sconce Light",
+            41: "Living Room Ceiling Light",
+            48: "Porch Light",
+            49: "Awning Light",
+            50: "Outdoor Light",
+            57: "Bedroom Light",
+            58: "Living Room Light",
+            59: "Kitchen Light",
+            63: "Bed Ceiling Light",
+            105: "Awning Light",
+            107: "Under Cabinet Light",
+            122: "Scare Light",
+            # Tanks
+            67: "Fresh Tank",
+            68: "Grey Tank",
+            69: "Black Tank",
+            70: "LP Tank",
+            71: "Generator Fuel Tank",
+            176: "LP Tank",
+            # Generator
+            95: "Generator",
+            # Other (not controllable via simple toggle)
+            88: "Landing Gear",
+            89: "Front Stabilizer",
+            90: "Rear Stabilizer",
+            96: "Vent Cover",
+            97: "Main Slide",
+        }
+        
+        # Device type classification by func_id
+        LIGHT_FUNC_IDS = {32, 33, 41, 48, 49, 50, 57, 58, 59, 63, 105, 107, 122}
+        TANK_FUNC_IDS = {67, 68, 69, 70, 71, 176}
+        GENERATOR_FUNC_ID = 95
+
+        reader: Optional[asyncio.StreamReader] = None
+        writer: Optional[asyncio.StreamWriter] = None
+        
+        lights: dict[str, dict] = {}
+        tanks: dict[str, dict] = {}
+        has_generator = False
+
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port),
+                timeout=10.0
+            )
+
+            async def send(payload: bytes) -> None:
+                writer.write(cobs_encode(payload))
+                await writer.drain()
+
+            # Register
+            await send(bytes([0x01, 0x06, UNIVERSAL_SESSION, 0x00]))
+            await asyncio.sleep(0.1)
+            await send(bytes([0x08, 0x00, UNIVERSAL_SESSION, 0x00]) + DEFAULT_UUID)
+
+            # Collect broadcasts
+            start = time.monotonic()
+            while time.monotonic() - start < duration:
+                try:
+                    data = await asyncio.wait_for(reader.read(8192), timeout=0.5)
+                    frames = decode_frames(data)
+                    for f in frames:
+                        # 08 02 frames: 08 02 [counter] 00 7d 28 [??] 00 [func_id] ...
+                        if len(f) >= 9 and f[0] == 0x08 and f[1] == 0x02:
+                            counter = f[2]
+                            func_id = f[8]
+                            
+                            if func_id <= 0:
+                                continue
+                                
+                            counter_hex = f"{counter:02x}"
+                            name = FUNCTION_NAMES.get(func_id, f"Device {func_id}")
+                            
+                            if func_id in LIGHT_FUNC_IDS:
+                                if counter_hex not in lights:
+                                    lights[counter_hex] = {
+                                        "name": name,
+                                        "func_id": func_id,
+                                    }
+                                    _LOGGER.debug("Discovered light: %s (counter=%s)", name, counter_hex)
+                            elif func_id in TANK_FUNC_IDS:
+                                if counter_hex not in tanks:
+                                    tanks[counter_hex] = {
+                                        "name": name,
+                                        "func_id": func_id,
+                                    }
+                                    _LOGGER.debug("Discovered tank: %s (counter=%s)", name, counter_hex)
+                            elif func_id == GENERATOR_FUNC_ID:
+                                has_generator = True
+                                _LOGGER.debug("Discovered generator")
+
+                except asyncio.TimeoutError:
+                    continue
+
+            _LOGGER.info("Discovery complete: %d lights, %d tanks, generator=%s",
+                        len(lights), len(tanks), has_generator)
+            
+            return {
+                "lights": lights,
+                "tanks": tanks,
+                "has_generator": has_generator,
+            }
+
+        except Exception as err:
+            _LOGGER.error("Error during device discovery: %s", err)
+            return {"lights": {}, "tanks": {}, "has_generator": False}
+
+        finally:
+            if writer:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass

@@ -8,6 +8,10 @@
           "host": "Host",
           "port": "Port"
         }
+      },
+      "confirm": {
+        "title": "Devices Discovered",
+        "description": "Found {light_count} lights and {tank_count} tanks:\n\n{discovered_devices}\n\nClick Submit to add these devices to Home Assistant."
       }
     },
     "error": {

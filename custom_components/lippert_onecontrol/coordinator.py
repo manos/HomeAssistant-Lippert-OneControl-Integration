@@ -10,12 +10,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import (
-    DOMAIN,
-    SCAN_INTERVAL,
-    KNOWN_LIGHTS,
-    KNOWN_TANKS,
-)
+from .const import DOMAIN, SCAN_INTERVAL
 from .onecontrol import OneControlClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,10 +42,6 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
         self.port = port
         self._client = OneControlClient(host, port)
         self._light_states: dict[int, bool] = {}
-
-        # Initialize known devices
-        self._light_counters = list(KNOWN_LIGHTS.keys())
-        self._tank_counters = list(KNOWN_TANKS.keys())
 
     async def _async_update_data(self) -> OneControlData:
         """Fetch data from OneControl."""
@@ -109,16 +100,6 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
     def get_light_state(self, counter: int) -> bool | None:
         """Get the tracked state of a light."""
         return self._light_states.get(counter)
-
-    @property
-    def available_lights(self) -> dict[int, dict[str, Any]]:
-        """Return available lights."""
-        return KNOWN_LIGHTS
-
-    @property
-    def available_tanks(self) -> dict[int, dict[str, Any]]:
-        """Return available tanks."""
-        return KNOWN_TANKS
 
     async def async_generator_on(self) -> bool:
         """Turn on the generator."""

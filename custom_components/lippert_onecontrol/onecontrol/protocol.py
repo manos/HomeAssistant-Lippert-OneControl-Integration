@@ -6,18 +6,20 @@ Implements:
 - Frame parsing
 """
 
+# Pre-computed CRC-8/MAXIM lookup table (poly=0x8C reflected)
+_CRC8_TABLE = [0] * 256
+for _i in range(256):
+    _c = _i
+    for _ in range(8):
+        _c = (_c >> 1) ^ 0x8C if _c & 1 else _c >> 1
+    _CRC8_TABLE[_i] = _c
+
 
 def crc8_maxim(data: bytes, init: int = 0x55) -> int:
     """CRC-8/MAXIM (poly=0x8C reflected, init=0x55)."""
-    table = [0] * 256
-    for i in range(256):
-        c = i
-        for _ in range(8):
-            c = (c >> 1) ^ 0x8C if c & 1 else c >> 1
-        table[i] = c
     crc = init
     for b in data:
-        crc = table[(crc ^ b) & 0xFF]
+        crc = _CRC8_TABLE[(crc ^ b) & 0xFF]
     return crc
 
 

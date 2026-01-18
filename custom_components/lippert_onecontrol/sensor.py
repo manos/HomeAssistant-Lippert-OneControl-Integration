@@ -53,7 +53,7 @@ async def async_setup_entry(
 class OneControlTankSensor(CoordinatorEntity[OneControlCoordinator], SensorEntity):
     """Representation of a Lippert OneControl tank sensor."""
 
-    _attr_device_class = SensorDeviceClass.BATTERY  # Using battery for percentage display
+    # Note: No device_class - tanks are not a standard HA device class
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_has_entity_name = True

@@ -6,7 +6,6 @@ via the Lippert OneControl system.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -14,9 +13,6 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, CONF_HOST, CONF_PORT, DEFAULT_PORT
 from .coordinator import OneControlCoordinator
-
-if TYPE_CHECKING:
-    from homeassistant.config_entries import ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 

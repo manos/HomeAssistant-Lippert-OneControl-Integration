@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import struct
+import time
 from typing import Optional
 
 from .protocol import cobs_encode, decode_frames, tea_encrypt
@@ -174,9 +175,9 @@ class OneControlClient:
 
             # Collect 01 03 frames
             levels: dict[int, int] = {}
-            start = asyncio.get_event_loop().time()
+            start = time.monotonic()
 
-            while asyncio.get_event_loop().time() - start < duration:
+            while time.monotonic() - start < duration:
                 try:
                     data = await asyncio.wait_for(reader.read(8192), timeout=0.5)
                     frames = decode_frames(data)
@@ -229,9 +230,9 @@ class OneControlClient:
             await send(bytes([0x08, 0x00, UNIVERSAL_SESSION, 0x00]) + DEFAULT_UUID)
 
             # Look for 05 03 87 frame (Generator Genie status)
-            start = asyncio.get_event_loop().time()
+            start = time.monotonic()
 
-            while asyncio.get_event_loop().time() - start < timeout:
+            while time.monotonic() - start < timeout:
                 try:
                     data = await asyncio.wait_for(reader.read(8192), timeout=0.5)
                     frames = decode_frames(data)
@@ -283,9 +284,9 @@ class OneControlClient:
             await send(bytes([0x08, 0x00, UNIVERSAL_SESSION, 0x00]) + DEFAULT_UUID)
 
             # Look for 05 03 80 frame (Hour meter)
-            start = asyncio.get_event_loop().time()
+            start = time.monotonic()
 
-            while asyncio.get_event_loop().time() - start < timeout:
+            while time.monotonic() - start < timeout:
                 try:
                     data = await asyncio.wait_for(reader.read(8192), timeout=0.5)
                     frames = decode_frames(data)

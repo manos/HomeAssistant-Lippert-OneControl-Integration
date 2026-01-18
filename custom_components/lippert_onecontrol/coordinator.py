@@ -15,7 +15,6 @@ from .const import (
     SCAN_INTERVAL,
     KNOWN_LIGHTS,
     KNOWN_TANKS,
-    GENERATOR_COUNTER,
 )
 from .onecontrol import OneControlClient
 
@@ -46,6 +45,7 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
         self.host = host
         self.port = port
         self._client = OneControlClient(host, port)
+        self._light_states: dict[int, bool] = {}
 
         # Initialize known devices
         self._light_counters = list(KNOWN_LIGHTS.keys())
@@ -65,7 +65,7 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
 
             # For lights, we don't poll state - we track it locally
             # (OneControl doesn't provide reliable state feedback)
-            lights = getattr(self, "_light_states", {})
+            lights = self._light_states.copy()
 
             return OneControlData(
                 lights=lights,
@@ -84,9 +84,6 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
         try:
             result = await self._client.light_on(counter)
             if result:
-                # Update local state tracking
-                if not hasattr(self, "_light_states"):
-                    self._light_states = {}
                 self._light_states[counter] = True
             return result
         except Exception as err:
@@ -98,9 +95,6 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
         try:
             result = await self._client.light_off(counter)
             if result:
-                # Update local state tracking
-                if not hasattr(self, "_light_states"):
-                    self._light_states = {}
                 self._light_states[counter] = False
             return result
         except Exception as err:
@@ -109,8 +103,6 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
 
     def get_light_state(self, counter: int) -> bool | None:
         """Get the tracked state of a light."""
-        if not hasattr(self, "_light_states"):
-            return None
         return self._light_states.get(counter)
 
     @property

@@ -1,7 +1,7 @@
 """Lippert OneControl integration for Home Assistant.
 
-Control RV lights, read tank levels, battery voltage, and generator hours
-via the Lippert OneControl system.
+Control RV lights, generator, read tank levels, battery voltage,
+generator state, and generator hours via the Lippert OneControl system.
 """
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [
     Platform.LIGHT,
     Platform.SENSOR,
+    Platform.SWITCH,
 ]
 
 

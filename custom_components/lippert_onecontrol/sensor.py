@@ -47,6 +47,9 @@ async def async_setup_entry(
     # Generator hours sensor
     entities.append(OneControlGeneratorHoursSensor(coordinator))
 
+    # Generator state sensor
+    entities.append(OneControlGeneratorStateSensor(coordinator))
+
     async_add_entities(entities)
 
 
@@ -170,6 +173,51 @@ class OneControlGeneratorHoursSensor(CoordinatorEntity[OneControlCoordinator], S
         if self.coordinator.data is None:
             return None
         return self.coordinator.data.generator_hours
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self.coordinator.last_update_success
+
+
+class OneControlGeneratorStateSensor(CoordinatorEntity[OneControlCoordinator], SensorEntity):
+    """Representation of Lippert OneControl generator state sensor."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_has_entity_name = True
+    _attr_name = "Generator State"
+    _attr_icon = "mdi:engine"
+    _attr_options = ["Off", "Priming", "Starting", "Running", "Stopping", "Unknown"]
+
+    def __init__(self, coordinator: OneControlCoordinator) -> None:
+        """Initialize the generator state sensor."""
+        super().__init__(coordinator)
+
+        self._attr_unique_id = "lippert_onecontrol_generator_state"
+
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, "onecontrol_controller")},
+            "name": "Lippert OneControl",
+            "manufacturer": "Lippert",
+            "model": "OneControl",
+        }
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the generator state as a string."""
+        if self.coordinator.data is None:
+            return None
+        state = self.coordinator.data.generator_state
+        if state is None:
+            return None
+        state_names = {
+            0: "Off",
+            1: "Priming",
+            2: "Starting",
+            3: "Running",
+            4: "Stopping",
+        }
+        return state_names.get(state, "Unknown")
 
     @property
     def available(self) -> bool:

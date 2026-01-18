@@ -32,6 +32,26 @@ UNIVERSAL_SESSION = 0x80
 UNIVERSAL_CONN = 0x40
 UNIVERSAL_DEVICE = 0x04
 
+# Generator-specific constants (uses different protocol!)
+GENERATOR_COUNTER = 0x87
+GENERATOR_PROTOCOL = 0x81
+GENERATOR_CONN = 0xe8
+
+# Generator state enum
+GENERATOR_STATE_OFF = 0
+GENERATOR_STATE_PRIMING = 1
+GENERATOR_STATE_STARTING = 2
+GENERATOR_STATE_RUNNING = 3
+GENERATOR_STATE_STOPPING = 4
+
+GENERATOR_STATE_NAMES = {
+    GENERATOR_STATE_OFF: "Off",
+    GENERATOR_STATE_PRIMING: "Priming",
+    GENERATOR_STATE_STARTING: "Starting",
+    GENERATOR_STATE_RUNNING: "Running",
+    GENERATOR_STATE_STOPPING: "Stopping",
+}
+
 
 class OneControlClient:
     """Client for communicating with Lippert OneControl."""
@@ -305,6 +325,176 @@ class OneControlClient:
         except Exception as err:
             _LOGGER.error("Error reading generator hours: %s", err)
             return None
+
+        finally:
+            if writer:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+
+    async def read_generator_state(self, timeout: float = 3.0) -> int | None:
+        """
+        Read generator state from Generator Genie broadcasts.
+        
+        Returns state as int:
+        - 0 = Off
+        - 1 = Priming
+        - 2 = Starting
+        - 3 = Running
+        - 4 = Stopping
+        
+        Or None if not found.
+        """
+        reader: Optional[asyncio.StreamReader] = None
+        writer: Optional[asyncio.StreamWriter] = None
+
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port),
+                timeout=10.0
+            )
+
+            async def send(payload: bytes) -> None:
+                writer.write(cobs_encode(payload))
+                await writer.drain()
+
+            # Register
+            await send(bytes([0x01, 0x06, UNIVERSAL_SESSION, 0x00]))
+            await asyncio.sleep(0.1)
+            await send(bytes([0x08, 0x00, UNIVERSAL_SESSION, 0x00]) + DEFAULT_UUID)
+
+            # Look for 05 03 87 frame (Generator Genie status)
+            start = time.monotonic()
+
+            while time.monotonic() - start < timeout:
+                try:
+                    data = await asyncio.wait_for(reader.read(8192), timeout=0.5)
+                    frames = decode_frames(data)
+                    for f in frames:
+                        # Generator Genie: 05 03 87 [state] ...
+                        if len(f) >= 4 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x87:
+                            return f[3]
+
+                except asyncio.TimeoutError:
+                    continue
+
+            return None
+
+        except Exception as err:
+            _LOGGER.error("Error reading generator state: %s", err)
+            return None
+
+        finally:
+            if writer:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+
+    async def generator_on(self) -> bool:
+        """Turn on the generator."""
+        return await self._control_generator(on=True)
+
+    async def generator_off(self) -> bool:
+        """Turn off the generator."""
+        return await self._control_generator(on=False)
+
+    async def _control_generator(self, on: bool) -> bool:
+        """
+        Control the generator (internal implementation).
+        
+        IMPORTANT: Generator uses DIFFERENT protocol than lights!
+        - Protocol: 0x81 (not 0x80)
+        - Control frame type: 0x01 (not 0x00)
+        - ON command: 0x02
+        - OFF command: 0x01
+        """
+        reader: Optional[asyncio.StreamReader] = None
+        writer: Optional[asyncio.StreamWriter] = None
+
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port),
+                timeout=10.0
+            )
+
+            async def send(payload: bytes) -> None:
+                writer.write(cobs_encode(payload))
+                await writer.drain()
+
+            async def recv(timeout: float = 0.5) -> list[bytes]:
+                try:
+                    data = await asyncio.wait_for(reader.read(8192), timeout=timeout)
+                    return decode_frames(data)
+                except asyncio.TimeoutError:
+                    return []
+
+            # 1. Register
+            session = 0x7a
+            await send(bytes([0x01, 0x06, session, 0x00]))
+            await asyncio.sleep(0.1)
+            await send(bytes([0x08, 0x00, session, 0x00]) + DEFAULT_UUID)
+            await asyncio.sleep(0.3)
+            await recv(0.3)
+
+            # 2. Seed request - Protocol 0x81, device type 42 00 04
+            await send(bytes([
+                0x02, GENERATOR_PROTOCOL, GENERATOR_CONN, GENERATOR_COUNTER,
+                0x42, 0x00, 0x04
+            ]))
+
+            # 3. Wait for seed (comes on protocol 0x82)
+            seed = None
+            for _ in range(10):
+                await asyncio.sleep(0.3)
+                frames = await recv()
+                for f in frames:
+                    # Look for 06 82 ... 42 00 04 [seed]
+                    if len(f) >= 11 and f[0] == 0x06 and f[1] == 0x82 and f[4] == 0x42:
+                        seed = int.from_bytes(f[7:11], 'big')
+                        break
+                if seed:
+                    break
+
+            if seed is None:
+                _LOGGER.error("Generator: No seed received")
+                return False
+
+            # 4. Compute key
+            key = tea_encrypt(seed, REMOTE_CONTROL_CYPHER)
+            key_bytes = struct.pack('>I', key)
+
+            # 5. Key transmit - device type 43 00 04
+            await send(bytes([
+                0x06, GENERATOR_PROTOCOL, GENERATOR_CONN, GENERATOR_COUNTER,
+                0x43, 0x00, 0x04
+            ]) + key_bytes)
+            await asyncio.sleep(0.2)
+            await recv()
+
+            # 6. Control command - Frame type 0x01 (NOT 0x00!)
+            # Commands: 0x02 = ON, 0x01 = OFF
+            cmd = 0x02 if on else 0x01
+            ctrl_conn = GENERATOR_CONN + 2
+            await send(bytes([
+                0x01, GENERATOR_PROTOCOL, ctrl_conn, GENERATOR_COUNTER,
+                0x00, cmd
+            ]))
+            await asyncio.sleep(0.3)
+            await recv()
+
+            _LOGGER.debug("Generator turned %s", "ON" if on else "OFF")
+            return True
+
+        except asyncio.TimeoutError:
+            _LOGGER.error("Timeout controlling generator")
+            return False
+        except Exception as err:
+            _LOGGER.error("Error controlling generator: %s", err)
+            return False
 
         finally:
             if writer:

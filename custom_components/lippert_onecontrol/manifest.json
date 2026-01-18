@@ -1,12 +1,12 @@
 {
   "domain": "lippert_onecontrol",
   "name": "Lippert OneControl",
-  "codeowners": ["@yourusername"],
+  "codeowners": ["@manos"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/yourusername/HomeAssistant-Lippert-OneControl-Integration",
+  "documentation": "https://github.com/manos/HomeAssistant-Lippert-OneControl-Integration",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/yourusername/HomeAssistant-Lippert-OneControl-Integration/issues",
+  "issue_tracker": "https://github.com/manos/HomeAssistant-Lippert-OneControl-Integration/issues",
   "requirements": [],
   "version": "0.1.0"
 }

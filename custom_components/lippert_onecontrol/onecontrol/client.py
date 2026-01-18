@@ -517,42 +517,56 @@ class OneControlClient:
         all possible device types.
         """
         # Known function IDs from decompiled app
+        # CRITICAL: Only include CONFIRMED lights - motors/heaters use same protocol!
         FUNCTION_NAMES = {
-            # Lights
+            # CONFIRMED LIGHTS (safe to toggle)
             32: "Kitchen Ceiling Light",
             33: "Kitchen Sconce Light",
             41: "Living Room Ceiling Light",
             48: "Porch Light",
-            49: "Awning Light",
+            49: "Awning Light",  # The actual LIGHT, not motor
             50: "Outdoor Light",
             57: "Bedroom Light",
             58: "Living Room Light",
             59: "Kitchen Light",
             63: "Bed Ceiling Light",
-            105: "Awning Light",
-            107: "Under Cabinet Light",
             122: "Scare Light",
-            # Tanks
+            # TANKS (read-only sensors)
             67: "Fresh Tank",
             68: "Grey Tank",
             69: "Black Tank",
             70: "LP Tank",
             71: "Generator Fuel Tank",
             176: "LP Tank",
-            # Generator
+            # GENERATOR
             95: "Generator",
-            # Other (not controllable via simple toggle)
+            # MOTORS/OTHER (NOT lights! Do NOT auto-add as lights!)
+            # 105 = Awning MOTOR (extend/retract) - NOT a light!
+            # 107 = Unknown (controls water heater on some RVs!)
+            # 88 = Landing Gear / Leveler
+            # 89-90 = Stabilizers
+            # 96 = Vent Cover
+            # 97 = Main Slide
+            105: "Awning",  # Motor, not light
+            107: "Under Cabinet Light",  # WARNING: May control water heater!
             88: "Landing Gear",
             89: "Front Stabilizer",
             90: "Rear Stabilizer",
             96: "Vent Cover",
             97: "Main Slide",
+            4: "Electric Water Heater",
+            3: "Gas Water Heater",
+            5: "Water Pump",
         }
         
-        # Device type classification by func_id
-        LIGHT_FUNC_IDS = {32, 33, 41, 48, 49, 50, 57, 58, 59, 63, 105, 107, 122}
+        # ONLY include func_ids we are 100% SURE are lights
+        # Removed: 105 (awning motor), 107 (may control water heater)
+        LIGHT_FUNC_IDS = {32, 33, 41, 48, 49, 50, 57, 58, 59, 63, 122}
         TANK_FUNC_IDS = {67, 68, 69, 70, 71, 176}
         GENERATOR_FUNC_ID = 95
+        
+        # Future: Motors that need different handling
+        # MOTOR_FUNC_IDS = {105, 97}  # Awning, Main Slide
 
         reader: Optional[asyncio.StreamReader] = None
         writer: Optional[asyncio.StreamWriter] = None

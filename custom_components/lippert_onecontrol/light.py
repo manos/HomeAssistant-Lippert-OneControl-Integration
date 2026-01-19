@@ -16,6 +16,27 @@ from .coordinator import OneControlCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 
+def get_light_icon(name: str) -> str:
+    """Get appropriate icon based on light name."""
+    name_lower = name.lower()
+    if "ceiling" in name_lower:
+        return "mdi:ceiling-light"
+    elif "porch" in name_lower:
+        return "mdi:coach-lamp"
+    elif "awning" in name_lower:
+        return "mdi:awning-outline"
+    elif "scare" in name_lower:
+        return "mdi:alarm-light"
+    elif "outdoor" in name_lower or "outside" in name_lower:
+        return "mdi:outdoor-lamp"
+    elif "sconce" in name_lower:
+        return "mdi:wall-sconce"
+    elif "cabinet" in name_lower:
+        return "mdi:light-recessed"
+    else:
+        return "mdi:lightbulb"
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -64,6 +85,9 @@ class OneControlLight(CoordinatorEntity[OneControlCoordinator], LightEntity):
         
         # Use just the device name (e.g., "Kitchen Ceiling Light")
         self._attr_name = name
+        
+        # Set icon based on light type
+        self._attr_icon = get_light_icon(name)
         
         # Unique ID based on counter
         self._attr_unique_id = f"lippert_onecontrol_light_{counter:02x}"

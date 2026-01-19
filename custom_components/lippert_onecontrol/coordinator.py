@@ -41,7 +41,17 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
         self.host = host
         self.port = port
         self._client = OneControlClient(host, port)
+        # Initialize light states - will be populated by init_light_states()
         self._light_states: dict[int, bool] = {}
+
+    def init_light_states(self, counters: list[int]) -> None:
+        """Initialize light states to False (off) for all discovered lights.
+        
+        This prevents lights from showing as 'Unknown' before first interaction.
+        """
+        for counter in counters:
+            if counter not in self._light_states:
+                self._light_states[counter] = False  # Assume off initially
 
     async def _async_update_data(self) -> OneControlData:
         """Fetch data from OneControl."""

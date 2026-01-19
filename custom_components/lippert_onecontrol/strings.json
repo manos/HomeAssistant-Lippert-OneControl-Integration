@@ -26,9 +26,10 @@
     "step": {
       "init": {
         "title": "OneControl Options",
+        "description": "Choose an action:",
         "menu_options": {
-          "rediscover": "🔄 Rediscover Devices",
-          "current_devices": "📋 View Current Devices"
+          "rediscover": "Rediscover Devices",
+          "current_devices": "View Current Devices"
         }
       },
       "current_devices": {

@@ -48,9 +48,12 @@ async def async_setup_entry(
     # Get discovered lights from config entry data
     discovered_lights = entry.data.get(CONF_DISCOVERED_LIGHTS, {})
     
+    # Initialize light states to prevent "Unknown" state
+    counters = []
     entities = []
     for counter_str, info in discovered_lights.items():
         counter = int(counter_str, 16) if isinstance(counter_str, str) else counter_str
+        counters.append(counter)
         entities.append(
             OneControlLight(
                 coordinator=coordinator,
@@ -59,6 +62,9 @@ async def async_setup_entry(
                 func_id=info.get("func_id"),
             )
         )
+
+    # Initialize all light states to False (off) - prevents "Unknown" state
+    coordinator.init_light_states(counters)
 
     async_add_entities(entities)
 

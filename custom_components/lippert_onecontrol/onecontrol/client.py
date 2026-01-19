@@ -61,13 +61,27 @@ class OneControlClient:
         self.host = host
         self.port = port
 
-    async def light_on(self, counter: int) -> bool:
-        """Turn on a light by its counter."""
-        return await self._control_light(counter, on=True)
+    async def light_on(self, counter: int, retries: int = 2) -> bool:
+        """Turn on a light by its counter with retries."""
+        for attempt in range(retries + 1):
+            result = await self._control_light(counter, on=True)
+            if result:
+                return True
+            if attempt < retries:
+                _LOGGER.warning("Light %02X ON failed, retrying (%d/%d)...", counter, attempt + 1, retries)
+                await asyncio.sleep(0.5)
+        return False
 
-    async def light_off(self, counter: int) -> bool:
-        """Turn off a light by its counter."""
-        return await self._control_light(counter, on=False)
+    async def light_off(self, counter: int, retries: int = 2) -> bool:
+        """Turn off a light by its counter with retries."""
+        for attempt in range(retries + 1):
+            result = await self._control_light(counter, on=False)
+            if result:
+                return True
+            if attempt < retries:
+                _LOGGER.warning("Light %02X OFF failed, retrying (%d/%d)...", counter, attempt + 1, retries)
+                await asyncio.sleep(0.5)
+        return False
 
     async def _control_light(self, counter: int, on: bool) -> bool:
         """Control a light (internal implementation)."""

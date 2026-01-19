@@ -33,7 +33,7 @@
       },
       "current_devices": {
         "title": "Current Devices",
-        "description": "Currently configured devices:\n\n{device_list}"
+        "description": "Lights ({light_count}): {lights}\n\nTanks ({tank_count}): {tanks}\n\nGenerator: {generator}"
       },
       "confirm_new": {
         "title": "New Devices Found!",

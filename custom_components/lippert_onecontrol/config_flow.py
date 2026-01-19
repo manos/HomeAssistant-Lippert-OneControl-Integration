@@ -218,24 +218,32 @@ class OneControlOptionsFlowHandler(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Show current configured devices."""
+        if user_input is not None:
+            # User clicked submit, just return to close
+            return self.async_create_entry(title="", data={})
+
         current_lights = self.config_entry.data.get(CONF_DISCOVERED_LIGHTS, {})
         current_tanks = self.config_entry.data.get(CONF_DISCOVERED_TANKS, {})
         has_generator = self.config_entry.data.get("has_generator", False)
 
-        light_names = [info["name"] for info in current_lights.values()]
-        tank_names = [info["name"] for info in current_tanks.values()]
+        light_names = sorted([info["name"] for info in current_lights.values()])
+        tank_names = sorted([info["name"] for info in current_tanks.values()])
 
-        description = []
-        description.append(f"**Lights ({len(light_names)}):** {', '.join(sorted(light_names)) or 'None'}")
-        description.append(f"**Tanks ({len(tank_names)}):** {', '.join(sorted(tank_names)) or 'None'}")
-        description.append(f"**Generator:** {'Yes' if has_generator else 'No'}")
+        # Build device list text
+        lights_text = ", ".join(light_names) if light_names else "None"
+        tanks_text = ", ".join(tank_names) if tank_names else "None"
+        generator_text = "Yes" if has_generator else "No"
 
         return self.async_show_form(
             step_id="current_devices",
+            data_schema=vol.Schema({}),  # Empty schema but still shows description
             description_placeholders={
-                "device_list": "\n".join(description),
+                "light_count": str(len(light_names)),
+                "lights": lights_text,
+                "tank_count": str(len(tank_names)),
+                "tanks": tanks_text,
+                "generator": generator_text,
             },
-            last_step=True,
         )
 
     async def async_step_rediscover(

@@ -196,10 +196,22 @@ class OneControlOptionsFlowHandler(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Manage the options - show menu."""
-        return self.async_show_menu(
+        """Manage the options - show action selection."""
+        if user_input is not None:
+            action = user_input.get("action")
+            if action == "rediscover":
+                return await self.async_step_rediscover()
+            elif action == "current_devices":
+                return await self.async_step_current_devices()
+
+        return self.async_show_form(
             step_id="init",
-            menu_options=["rediscover", "current_devices"],
+            data_schema=vol.Schema({
+                vol.Required("action"): vol.In({
+                    "rediscover": "🔄 Rediscover Devices",
+                    "current_devices": "📋 View Current Devices",
+                })
+            }),
         )
 
     async def async_step_current_devices(

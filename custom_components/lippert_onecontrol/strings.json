@@ -21,5 +21,28 @@
     "abort": {
       "already_configured": "This OneControl controller is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "OneControl Options",
+        "menu_options": {
+          "rediscover": "🔄 Rediscover Devices",
+          "current_devices": "📋 View Current Devices"
+        }
+      },
+      "current_devices": {
+        "title": "Current Devices",
+        "description": "Currently configured devices:\n\n{device_list}"
+      },
+      "confirm_new": {
+        "title": "New Devices Found!",
+        "description": "Found {new_light_count} new lights and {new_tank_count} new tanks:\n\n{new_devices}\n\nClick Submit to add these devices. Your existing devices and dashboard configurations will be preserved."
+      }
+    },
+    "abort": {
+      "no_new_devices": "No new devices found. All discoverable devices are already configured.",
+      "discovery_failed": "Failed to connect to the OneControl controller. Check your network connection."
+    }
   }
 }

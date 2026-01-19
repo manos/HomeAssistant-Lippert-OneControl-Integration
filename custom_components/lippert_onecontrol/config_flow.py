@@ -7,8 +7,14 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_HOST, CONF_PORT
+from homeassistant.core import callback
 
 from .const import (
     DOMAIN,
@@ -55,6 +61,12 @@ class OneControlConfigFlow(ConfigFlow, domain=DOMAIN):
         self._discovered_lights: dict = {}
         self._discovered_tanks: dict = {}
         self._has_generator: bool = False
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        """Get the options flow for this handler."""
+        return OneControlOptionsFlowHandler(config_entry)
 
     async def async_step_integration_discovery(
         self, discovery_info: dict[str, Any]
@@ -168,5 +180,151 @@ class OneControlConfigFlow(ConfigFlow, domain=DOMAIN):
                 "discovered_devices": "\n".join(description),
                 "light_count": str(len(self._discovered_lights)),
                 "tank_count": str(len(self._discovered_tanks)),
+            },
+        )
+
+
+class OneControlOptionsFlowHandler(OptionsFlow):
+    """Handle options flow for Lippert OneControl."""
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        """Initialize options flow."""
+        self.config_entry = config_entry
+        self._new_lights: dict = {}
+        self._new_tanks: dict = {}
+        self._has_new_generator: bool = False
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Manage the options - show menu."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["rediscover", "current_devices"],
+        )
+
+    async def async_step_current_devices(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show current configured devices."""
+        current_lights = self.config_entry.data.get(CONF_DISCOVERED_LIGHTS, {})
+        current_tanks = self.config_entry.data.get(CONF_DISCOVERED_TANKS, {})
+        has_generator = self.config_entry.data.get("has_generator", False)
+
+        light_names = [info["name"] for info in current_lights.values()]
+        tank_names = [info["name"] for info in current_tanks.values()]
+
+        description = []
+        description.append(f"**Lights ({len(light_names)}):** {', '.join(sorted(light_names)) or 'None'}")
+        description.append(f"**Tanks ({len(tank_names)}):** {', '.join(sorted(tank_names)) or 'None'}")
+        description.append(f"**Generator:** {'Yes' if has_generator else 'No'}")
+
+        return self.async_show_form(
+            step_id="current_devices",
+            description_placeholders={
+                "device_list": "\n".join(description),
+            },
+            last_step=True,
+        )
+
+    async def async_step_rediscover(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Run device rediscovery."""
+        host = self.config_entry.data.get(CONF_HOST, DEFAULT_HOST)
+        port = self.config_entry.data.get(CONF_PORT, DEFAULT_PORT)
+
+        _LOGGER.info("Running rediscovery on %s:%d", host, port)
+
+        # Get current devices
+        current_lights = self.config_entry.data.get(CONF_DISCOVERED_LIGHTS, {})
+        current_tanks = self.config_entry.data.get(CONF_DISCOVERED_TANKS, {})
+        current_has_generator = self.config_entry.data.get("has_generator", False)
+
+        # Run discovery
+        client = OneControlClient(host, port)
+        try:
+            discovered = await client.discover_devices(duration=5.0)
+            discovered_lights = discovered.get("lights", {})
+            discovered_tanks = discovered.get("tanks", {})
+            discovered_has_generator = discovered.get("has_generator", False)
+        except Exception as err:
+            _LOGGER.error("Rediscovery failed: %s", err)
+            return self.async_abort(reason="discovery_failed")
+
+        # Find NEW devices (not already in current config)
+        self._new_lights = {
+            k: v for k, v in discovered_lights.items()
+            if k not in current_lights
+        }
+        self._new_tanks = {
+            k: v for k, v in discovered_tanks.items()
+            if k not in current_tanks
+        }
+        self._has_new_generator = discovered_has_generator and not current_has_generator
+
+        # Check if we found anything new
+        if not self._new_lights and not self._new_tanks and not self._has_new_generator:
+            return self.async_abort(reason="no_new_devices")
+
+        # Show what we found
+        return await self.async_step_confirm_new()
+
+    async def async_step_confirm_new(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm adding new devices."""
+        if user_input is not None:
+            # Merge new devices with existing
+            current_lights = dict(self.config_entry.data.get(CONF_DISCOVERED_LIGHTS, {}))
+            current_tanks = dict(self.config_entry.data.get(CONF_DISCOVERED_TANKS, {}))
+            current_has_generator = self.config_entry.data.get("has_generator", False)
+
+            # Add new devices
+            current_lights.update(self._new_lights)
+            current_tanks.update(self._new_tanks)
+            new_has_generator = current_has_generator or self._has_new_generator
+
+            # Update the config entry data
+            new_data = {
+                **self.config_entry.data,
+                CONF_DISCOVERED_LIGHTS: current_lights,
+                CONF_DISCOVERED_TANKS: current_tanks,
+                "has_generator": new_has_generator,
+            }
+
+            self.hass.config_entries.async_update_entry(
+                self.config_entry,
+                data=new_data,
+            )
+
+            _LOGGER.info(
+                "Added %d new lights, %d new tanks, generator=%s",
+                len(self._new_lights),
+                len(self._new_tanks),
+                self._has_new_generator,
+            )
+
+            # Return empty options dict - we updated data directly
+            return self.async_create_entry(title="", data={})
+
+        # Build description of new devices
+        new_light_names = [info["name"] for info in self._new_lights.values()]
+        new_tank_names = [info["name"] for info in self._new_tanks.values()]
+
+        description = []
+        if new_light_names:
+            description.append(f"**New Lights:** {', '.join(sorted(new_light_names))}")
+        if new_tank_names:
+            description.append(f"**New Tanks:** {', '.join(sorted(new_tank_names))}")
+        if self._has_new_generator:
+            description.append("**New:** Generator")
+
+        return self.async_show_form(
+            step_id="confirm_new",
+            description_placeholders={
+                "new_devices": "\n".join(description),
+                "new_light_count": str(len(self._new_lights)),
+                "new_tank_count": str(len(self._new_tanks)),
             },
         )

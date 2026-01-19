@@ -542,13 +542,13 @@ class OneControlClient:
             95: "Generator",
             # MOTORS/OTHER (NOT lights! Do NOT auto-add as lights!)
             # 105 = Awning MOTOR (extend/retract) - NOT a light!
-            # 107 = Unknown (controls water heater on some RVs!)
+            # 107 = Water Tank Heater (heating pad under fresh tank)
             # 88 = Landing Gear / Leveler
             # 89-90 = Stabilizers
             # 96 = Vent Cover
             # 97 = Main Slide
             105: "Awning",  # Motor, not light
-            107: "Under Cabinet Light",  # WARNING: May control water heater!
+            107: "Water Tank Heater",  # Heating pad - NOT a light!
             88: "Landing Gear",
             89: "Front Stabilizer",
             90: "Rear Stabilizer",

@@ -54,19 +54,15 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
                 self._light_states[counter] = False  # Assume off initially
 
     async def _async_update_data(self) -> OneControlData:
-        """Fetch data from OneControl."""
+        """Fetch data from OneControl.
+        
+        Uses a single connection to read ALL sensor data efficiently.
+        Previous approach opened 4 separate connections (12+ seconds).
+        Now takes ~3 seconds total.
+        """
         try:
-            # Read tank levels
-            tanks = await self._client.read_tank_levels()
-
-            # Read battery voltage
-            voltage = await self._client.read_battery_voltage()
-
-            # Read generator hours
-            hours = await self._client.read_generator_hours()
-
-            # Read generator state
-            gen_state = await self._client.read_generator_state()
+            # Read ALL sensors in ONE connection (much faster!)
+            sensor_data = await self._client.read_all_sensors(duration=3.0)
 
             # For lights, we don't poll state - we track it locally
             # (OneControl doesn't provide reliable state feedback)
@@ -74,10 +70,10 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
 
             return OneControlData(
                 lights=lights,
-                tanks=tanks,
-                battery_voltage=voltage,
-                generator_hours=hours,
-                generator_state=gen_state,
+                tanks=sensor_data.get("tanks", {}),
+                battery_voltage=sensor_data.get("battery_voltage"),
+                generator_hours=sensor_data.get("generator_hours"),
+                generator_state=sensor_data.get("generator_state"),
             )
 
         except asyncio.TimeoutError as err:

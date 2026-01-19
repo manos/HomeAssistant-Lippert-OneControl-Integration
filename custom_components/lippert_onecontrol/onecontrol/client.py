@@ -183,6 +183,92 @@ class OneControlClient:
                 except Exception:
                     pass
 
+    async def read_all_sensors(self, duration: float = 3.0) -> dict:
+        """
+        Read ALL sensor data in a SINGLE connection.
+        
+        This is much more efficient than calling individual read methods,
+        which each open separate connections.
+        
+        Returns dict with:
+        - tanks: {counter: level_percentage}
+        - battery_voltage: float | None
+        - generator_hours: float | None
+        - generator_state: int | None
+        """
+        reader: Optional[asyncio.StreamReader] = None
+        writer: Optional[asyncio.StreamWriter] = None
+
+        result = {
+            "tanks": {},
+            "battery_voltage": None,
+            "generator_hours": None,
+            "generator_state": None,
+        }
+
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port),
+                timeout=10.0
+            )
+
+            async def send(payload: bytes) -> None:
+                writer.write(cobs_encode(payload))
+                await writer.drain()
+
+            # Register once
+            await send(bytes([0x01, 0x06, UNIVERSAL_SESSION, 0x00]))
+            await asyncio.sleep(0.1)
+            await send(bytes([0x08, 0x00, UNIVERSAL_SESSION, 0x00]) + DEFAULT_UUID)
+
+            # Collect ALL broadcast frames in one pass
+            start = time.monotonic()
+
+            while time.monotonic() - start < duration:
+                try:
+                    data = await asyncio.wait_for(reader.read(8192), timeout=0.5)
+                    frames = decode_frames(data)
+                    for f in frames:
+                        # Tank levels: 01 03 [counter] [level]
+                        if len(f) >= 4 and f[0] == 0x01 and f[1] == 0x03:
+                            counter = f[2]
+                            level = f[3]
+                            result["tanks"][counter] = level
+
+                        # Generator Genie status: 05 03 87 [state] [volt_hi] [volt_lo] ...
+                        elif len(f) >= 6 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x87:
+                            result["generator_state"] = f[3]
+                            result["battery_voltage"] = f[4] + f[5] / 256.0
+
+                        # Hour meter: 05 03 80 [uint32 BE seconds] [status]
+                        elif len(f) >= 8 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x80:
+                            operating_seconds = int.from_bytes(f[3:7], 'big')
+                            result["generator_hours"] = operating_seconds / 3600.0
+
+                except asyncio.TimeoutError:
+                    continue
+
+            _LOGGER.debug(
+                "read_all_sensors: tanks=%d, voltage=%s, hours=%s, state=%s",
+                len(result["tanks"]),
+                result["battery_voltage"],
+                result["generator_hours"],
+                result["generator_state"],
+            )
+            return result
+
+        except Exception as err:
+            _LOGGER.error("Error reading sensors: %s", err)
+            return result
+
+        finally:
+            if writer:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+
     async def read_tank_levels(self, duration: float = 3.0) -> dict[int, int]:
         """
         Read tank levels from controller broadcasts.

@@ -1,0 +1,35 @@
+{
+  "entity": {
+    "light": {
+      "default": "mdi:lightbulb"
+    },
+    "sensor": {
+      "fresh_tank": {
+        "default": "mdi:water"
+      },
+      "grey_tank": {
+        "default": "mdi:water-opacity"
+      },
+      "black_tank": {
+        "default": "mdi:water-off"
+      },
+      "lp_tank": {
+        "default": "mdi:propane-tank"
+      },
+      "battery_voltage": {
+        "default": "mdi:car-battery"
+      },
+      "generator_hours": {
+        "default": "mdi:engine"
+      },
+      "generator_state": {
+        "default": "mdi:engine"
+      }
+    },
+    "switch": {
+      "generator": {
+        "default": "mdi:engine"
+      }
+    }
+  }
+}

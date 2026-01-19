@@ -56,6 +56,23 @@ class OneControlConfigFlow(ConfigFlow, domain=DOMAIN):
         self._discovered_tanks: dict = {}
         self._has_generator: bool = False
 
+    async def async_step_integration_discovery(
+        self, discovery_info: dict[str, Any]
+    ) -> ConfigFlowResult:
+        """Handle auto-discovery of OneControl controller."""
+        self._host = discovery_info.get(CONF_HOST, DEFAULT_HOST)
+        self._port = discovery_info.get(CONF_PORT, DEFAULT_PORT)
+
+        # Check if already configured
+        await self.async_set_unique_id(f"lippert_onecontrol_{self._host}")
+        self._abort_if_unique_id_configured()
+
+        # Set the title for the discovery notification
+        self.context["title_placeholders"] = {"host": self._host}
+
+        # Go directly to device discovery
+        return await self.async_step_discover()
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:

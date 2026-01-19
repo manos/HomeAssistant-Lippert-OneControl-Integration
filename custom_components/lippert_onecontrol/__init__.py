@@ -5,13 +5,14 @@ generator state, and generator hours via the Lippert OneControl system.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, SOURCE_INTEGRATION_DISCOVERY
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, CONF_HOST, CONF_PORT, DEFAULT_PORT
+from .const import DOMAIN, CONF_HOST, CONF_PORT, DEFAULT_HOST, DEFAULT_PORT
 from .coordinator import OneControlCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -21,6 +22,47 @@ PLATFORMS: list[Platform] = [
     Platform.SENSOR,
     Platform.SWITCH,
 ]
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up the Lippert OneControl component.
+    
+    This runs once when Home Assistant starts and attempts to discover
+    the OneControl controller at the default IP (192.168.1.1:6969).
+    """
+    
+    async def _async_discover() -> None:
+        """Try to discover OneControl controller."""
+        # Check if already configured
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            if entry.data.get(CONF_HOST) == DEFAULT_HOST:
+                _LOGGER.debug("OneControl already configured, skipping discovery")
+                return
+
+        # Try to connect to the default IP
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(DEFAULT_HOST, DEFAULT_PORT),
+                timeout=3.0
+            )
+            writer.close()
+            await writer.wait_closed()
+            
+            _LOGGER.info("OneControl controller discovered at %s:%d", DEFAULT_HOST, DEFAULT_PORT)
+            
+            # Trigger discovery flow
+            await hass.config_entries.flow.async_init(
+                DOMAIN,
+                context={"source": SOURCE_INTEGRATION_DISCOVERY},
+                data={CONF_HOST: DEFAULT_HOST, CONF_PORT: DEFAULT_PORT},
+            )
+        except (asyncio.TimeoutError, OSError, ConnectionRefusedError):
+            _LOGGER.debug("No OneControl controller found at %s:%d", DEFAULT_HOST, DEFAULT_PORT)
+
+    # Schedule discovery after HA is fully started
+    hass.async_create_task(_async_discover())
+    
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

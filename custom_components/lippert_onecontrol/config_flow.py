@@ -66,7 +66,7 @@ class OneControlConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         """Get the options flow for this handler."""
-        return OneControlOptionsFlowHandler(config_entry)
+        return OneControlOptionsFlowHandler()
 
     async def async_step_integration_discovery(
         self, discovery_info: dict[str, Any]
@@ -187,9 +187,8 @@ class OneControlConfigFlow(ConfigFlow, domain=DOMAIN):
 class OneControlOptionsFlowHandler(OptionsFlow):
     """Handle options flow for Lippert OneControl."""
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
+    def __init__(self) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
         self._new_lights: dict = {}
         self._new_tanks: dict = {}
         self._has_new_generator: bool = False

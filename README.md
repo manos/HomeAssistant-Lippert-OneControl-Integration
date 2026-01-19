@@ -48,18 +48,38 @@ Control your RV's Lippert OneControl system directly from Home Assistant!
 3. Search for "Lippert OneControl"
 4. Enter your controller's IP address (default: `192.168.1.1`)
 
-> **Note:** You must be connected to your RV's WiFi network for the integration to work.
+## Network Setup
 
-## Network Requirements
-
-The OneControl controller typically runs on:
+The OneControl controller runs on the RV's internal WiFi network:
 - **IP:** `192.168.1.1`
 - **Port:** `6969`
 
-Your Home Assistant instance must be able to reach this IP. Options:
-1. Connect HA to your RV's WiFi network
-2. Bridge your RV WiFi to your home network
-3. Use a dual-interface setup
+Your Home Assistant instance must be able to reach this IP. 
+
+### Recommended: Raspberry Pi Bridge
+
+The easiest way to integrate OneControl with your home network is using a **Raspberry Pi as a network bridge**:
+
+```
+┌─────────────┐      WiFi       ┌──────────────┐     Ethernet    ┌─────────────┐
+│  OneControl │  ────────────►  │ Raspberry Pi │  ─────────────► │    Home     │
+│  Controller │   192.168.1.x   │   (bridge)   │   Your LAN      │  Assistant  │
+│ 192.168.1.1 │                 └──────────────┘                 └─────────────┘
+└─────────────┘
+```
+
+**Setup:**
+1. Connect Pi's **WiFi** to your RV's OneControl network
+2. Connect Pi's **Ethernet** to your home network (or run HA directly on the Pi)
+3. Enable IP forwarding and set up routing/NAT on the Pi
+4. Home Assistant can now reach `192.168.1.1` through the Pi
+
+This approach lets Home Assistant stay on your main network while accessing the RV's isolated OneControl system.
+
+### Alternative Options
+- Run Home Assistant directly on a Pi connected to RV WiFi
+- Use a travel router to bridge networks
+- Dual-interface setup on your HA host
 
 ## Known Devices
 
@@ -92,7 +112,8 @@ For technical details, see the [OneControl-RV-C-Protocol](https://github.com/man
 ## Troubleshooting
 
 ### Cannot Connect
-- Verify you're on the RV WiFi network
+- Verify Home Assistant can reach `192.168.1.1` (ping test)
+- If using a Pi bridge, ensure the bridge is running and routing is configured
 - Check that the controller IP is correct
 - Ensure no firewall is blocking port 6969
 

@@ -7,23 +7,26 @@ Control your RV's Lippert OneControl system directly from Home Assistant!
 
 ## Features
 
-- **💡 Light Control**: Turn lights ON/OFF
-  - Kitchen Ceiling
-  - Living Room Ceiling
-  - Bed Ceiling
-  - Porch Light
-  - Awning Light
-  - Scare Light
+- **💡 Light Control**: Turn RV lights ON/OFF
+  - Ceiling lights, porch lights, awning lights, scare lights, and more
+  - Automatic discovery of installed lights
 
-- **📊 Tank Sensors**: Monitor levels
+- **📊 Tank Sensors**: Monitor tank levels
   - Fresh Water
   - Grey Water
   - Black Water
   - LP Gas (Propane)
 
-- **🔋 Battery Voltage**: Real-time monitoring
+- **🔋 Battery Voltage**: Real-time chassis battery monitoring
 
-- **⏱️ Generator Hours**: Track runtime
+- **⚡ Generator Control**: Start/stop your generator
+  - Power switch (ON/OFF)
+  - State monitoring (Off, Priming, Starting, Running, Stopping)
+  - Hour meter tracking
+
+- **🔄 Auto-Discovery**: Automatically finds devices installed in your RV
+  - No manual configuration of device IDs needed
+  - Rediscover devices anytime via Configure menu
 
 ## Installation
 
@@ -47,6 +50,16 @@ Control your RV's Lippert OneControl system directly from Home Assistant!
 2. Click **+ Add Integration**
 3. Search for "Lippert OneControl"
 4. Enter your controller's IP address (default: `192.168.1.1`)
+5. The integration will auto-discover your installed devices
+
+### Rediscovering Devices
+
+If you add new devices to your RV or update the integration:
+
+1. Go to **Settings → Devices & Services → Integrations**
+2. Find **Lippert OneControl** → click **Configure**
+3. Select **🔄 Rediscover Devices**
+4. New devices will be added without affecting existing ones
 
 ## Network Setup
 
@@ -81,20 +94,37 @@ This approach lets Home Assistant stay on your main network while accessing the 
 - Use a travel router to bridge networks
 - Dual-interface setup on your HA host
 
-## Known Devices
+## Supported Devices
 
-| Counter | Device | Type |
-|---------|--------|------|
-| 0x28 | Kitchen Ceiling Light | Light |
-| 0x77 | Living Room Ceiling Light | Light |
-| 0xFB | Bed Ceiling Light | Light |
-| 0xCF | Porch Light | Light |
-| 0x15 | Awning Light | Light |
-| 0xFF | Scare Light | Light |
-| 0x3E | Fresh Tank | Sensor |
-| 0x04 | Grey Tank | Sensor |
-| 0x86 | Black Tank | Sensor |
-| 0x10 | LP Tank | Sensor |
+The integration automatically discovers devices based on their function ID. Common device types include:
+
+### Lights (controllable)
+| Function ID | Device Name |
+|-------------|-------------|
+| 32 | Kitchen Ceiling Light |
+| 33 | Kitchen Sconce Light |
+| 41 | Living Room Ceiling Light |
+| 48 | Porch Light |
+| 49 | Awning Light |
+| 50 | Outdoor Light |
+| 57 | Bedroom Light |
+| 63 | Bed Ceiling Light |
+| 122 | Scare Light |
+
+### Tanks (sensors)
+| Function ID | Device Name |
+|-------------|-------------|
+| 67 | Fresh Tank |
+| 68 | Grey Tank |
+| 69 | Black Tank |
+| 70 | LP Tank |
+
+### Generator
+| Function ID | Device Name |
+|-------------|-------------|
+| 95 | Generator (control + sensors) |
+
+> **Note:** Device counters (internal IDs) vary per RV installation. The integration uses function IDs to identify device types, then auto-discovers the specific counters for your RV.
 
 ## Protocol Details
 
@@ -107,7 +137,16 @@ For technical details, see the [OneControl-RV-C-Protocol](https://github.com/man
 
 ## Safety Notice
 
-⚠️ **This integration only controls lights.** Water heaters, slides, awnings, levelers, and other motorized equipment require additional safety considerations and are not included in this release.
+⚠️ **This integration controls lights and the generator.** 
+
+The following device types are intentionally **NOT** exposed for safety:
+- Water heaters (fire risk if tank is empty)
+- Slides (collision risk)
+- Awning motor (collision risk)
+- Levelers/landing gear (vehicle stability)
+- Water pump (dry-run damage)
+
+These may be added in future versions with appropriate safety controls.
 
 ## Troubleshooting
 
@@ -125,6 +164,11 @@ For technical details, see the [OneControl-RV-C-Protocol](https://github.com/man
 ### Sensors Not Updating
 - Tank levels and battery voltage are polled every 30 seconds
 - Some sensors require the RV's electrical system to be active
+
+### No Devices Found
+- Ensure your RV's OneControl system is powered on
+- Try running rediscovery after a few seconds
+- Check HA logs for connection errors
 
 ## Contributing
 

@@ -22,27 +22,41 @@ DEVICE_TYPE_GENERATOR: Final = "generator"
 DEVICE_TYPE_WATER_HEATER: Final = "water_heater"
 
 # All known function IDs from decompiled OneControl app
-# These are ALL possible devices - actual presence is discovered via auto-discovery
+# These are device NAME lookups - actual devices are discovered via auto-discovery
+# NOTE: func_id determines device TYPE, not whether it's safe to control!
 FUNCTION_NAMES: Final = {
-    # Lights
+    # LIGHTS (safe to auto-toggle)
     32: "Kitchen Ceiling Light",
-    41: "Living Room Ceiling Light", 
+    33: "Kitchen Sconce Light",
+    41: "Living Room Ceiling Light",
     48: "Porch Light",
+    49: "Awning Light",  # The actual LIGHT near awning
+    50: "Outdoor Light",
+    57: "Bedroom Light",
+    58: "Living Room Light",
     59: "Kitchen Light",
     63: "Bed Ceiling Light",
     122: "Scare Light",
-    105: "Awning Light",
-    # Tanks
+    # TANKS (read-only sensors)
     67: "Fresh Tank",
     68: "Grey Tank",
     69: "Black Tank",
     70: "LP Tank",
-    # Other
+    71: "Generator Fuel Tank",
+    176: "LP Tank",
+    # GENERATOR
     95: "Generator",
-    88: "Landing Gear",
+    # MOTORS/OTHER - NOT lights! (require special handling)
+    105: "Awning",  # Awning MOTOR (extend/retract) - NOT a light!
+    107: "Water Tank Heater",  # Heating pad under fresh tank
+    88: "Landing Gear",  # Leveler
+    89: "Front Stabilizer",
+    90: "Rear Stabilizer",
+    96: "Vent Cover",
+    97: "Main Slide",
     4: "Electric Water Heater",
-    5: "Water Pump",
     3: "Gas Water Heater",
+    5: "Water Pump",
 }
 
 # Area mapping - derive suggested area from device name keywords
@@ -55,6 +69,7 @@ AREA_MAPPING: Final = {
     "porch": "Outdoor",
     "awning": "Outdoor",
     "scare": "Outdoor",
+    "outdoor": "Outdoor",
     "fresh": "Utility",
     "grey": "Utility",
     "gray": "Utility",
@@ -64,6 +79,7 @@ AREA_MAPPING: Final = {
     "generator": "Utility",
     "water heater": "Utility",
     "water pump": "Utility",
+    "water tank heater": "Utility",
 }
 
 

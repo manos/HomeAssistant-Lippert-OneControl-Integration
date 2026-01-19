@@ -8,14 +8,22 @@ from __future__ import annotations
 import asyncio
 import logging
 
+import voluptuous as vol
+
 from homeassistant.config_entries import ConfigEntry, SOURCE_INTEGRATION_DISCOVERY
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.const import Platform, EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import HomeAssistant, Event
 
 from .const import DOMAIN, CONF_HOST, CONF_PORT, DEFAULT_HOST, DEFAULT_PORT
 from .coordinator import OneControlCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+# Empty schema allows async_setup to be called without YAML config
+CONFIG_SCHEMA = vol.Schema(
+    {DOMAIN: vol.Schema({})},
+    extra=vol.ALLOW_EXTRA,
+)
 
 PLATFORMS: list[Platform] = [
     Platform.LIGHT,
@@ -25,14 +33,13 @@ PLATFORMS: list[Platform] = [
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Set up the Lippert OneControl component.
+    """Set up the Lippert OneControl component."""
+    _LOGGER.debug("OneControl async_setup called")
     
-    This runs once when Home Assistant starts and attempts to discover
-    the OneControl controller at the default IP (192.168.1.1:6969).
-    """
-    
-    async def _async_discover() -> None:
+    async def _async_discover(event: Event | None = None) -> None:
         """Try to discover OneControl controller."""
+        _LOGGER.debug("OneControl discovery starting...")
+        
         # Check if already configured
         for entry in hass.config_entries.async_entries(DOMAIN):
             if entry.data.get(CONF_HOST) == DEFAULT_HOST:
@@ -40,6 +47,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 return
 
         # Try to connect to the default IP
+        _LOGGER.debug("Checking for OneControl at %s:%d", DEFAULT_HOST, DEFAULT_PORT)
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(DEFAULT_HOST, DEFAULT_PORT),
@@ -48,7 +56,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             writer.close()
             await writer.wait_closed()
             
-            _LOGGER.info("OneControl controller discovered at %s:%d", DEFAULT_HOST, DEFAULT_PORT)
+            _LOGGER.info("OneControl controller discovered at %s:%d!", DEFAULT_HOST, DEFAULT_PORT)
             
             # Trigger discovery flow
             await hass.config_entries.flow.async_init(
@@ -56,11 +64,16 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 context={"source": SOURCE_INTEGRATION_DISCOVERY},
                 data={CONF_HOST: DEFAULT_HOST, CONF_PORT: DEFAULT_PORT},
             )
-        except (asyncio.TimeoutError, OSError, ConnectionRefusedError):
-            _LOGGER.debug("No OneControl controller found at %s:%d", DEFAULT_HOST, DEFAULT_PORT)
+        except (asyncio.TimeoutError, OSError, ConnectionRefusedError) as err:
+            _LOGGER.debug("No OneControl controller found at %s:%d: %s", DEFAULT_HOST, DEFAULT_PORT, err)
 
-    # Schedule discovery after HA is fully started
-    hass.async_create_task(_async_discover())
+    # Wait for HA to fully start, then run discovery
+    if hass.is_running:
+        # HA already started, run now
+        hass.async_create_task(_async_discover())
+    else:
+        # Wait for HA to start
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_discover)
     
     return True
 

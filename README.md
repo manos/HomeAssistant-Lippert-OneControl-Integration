@@ -10,6 +10,7 @@ Control your RV's Lippert OneControl system directly from Home Assistant!
 - **💡 Light Control**: Turn RV lights ON/OFF
   - Ceiling lights, porch lights, awning lights, scare lights, and more
   - Automatic discovery of installed lights
+  - Real-time state sync from broadcasts
 
 - **📊 Tank Sensors**: Monitor tank levels
   - Fresh Water
@@ -17,16 +18,32 @@ Control your RV's Lippert OneControl system directly from Home Assistant!
   - Black Water
   - LP Gas (Propane)
 
-- **🔋 Battery Voltage**: Real-time chassis battery monitoring
+- **🔋 Battery Voltage**: Real-time battery monitoring
 
 - **⚡ Generator Control**: Start/stop your generator
   - Power switch (ON/OFF)
   - State monitoring (Off, Priming, Starting, Running, Stopping)
   - Hour meter tracking
 
+- **🔥 Water Heaters**: Control gas and electric water heaters
+  - Gas Water Heater (ON/OFF)
+  - Electric Water Heater (ON/OFF)
+  - Real-time state sync from broadcasts
+
+- **💧 Water Pump**: Control your RV's water pump
+  - ON/OFF control
+  - Real-time state sync from broadcasts
+
 - **🔄 Auto-Discovery**: Automatically finds devices installed in your RV
   - No manual configuration of device IDs needed
+  - Device selection UI during setup - choose which devices to add
   - Rediscover devices anytime via Configure menu
+  - Existing devices preserved when rediscovering
+
+- **📡 Real-Time State Sync**: Device states update automatically
+  - Lights, water heaters, and water pump sync from OneControl broadcasts
+  - ~7 second polling interval for fast state updates
+  - Changes from the OneControl app reflect in Home Assistant
 
 ## Installation
 
@@ -51,6 +68,7 @@ Control your RV's Lippert OneControl system directly from Home Assistant!
 3. Search for "Lippert OneControl"
 4. Enter your controller's IP address (default: `192.168.1.1`)
 5. The integration will auto-discover your installed devices
+6. Select which devices you want to add (all are selected by default)
 
 ### Rediscovering Devices
 
@@ -59,7 +77,14 @@ If you add new devices to your RV or update the integration:
 1. Go to **Settings → Devices & Services → Integrations**
 2. Find **Lippert OneControl** → click **Configure**
 3. Select **🔄 Rediscover Devices**
-4. New devices will be added without affecting existing ones
+4. New devices will be shown for selection
+5. Your existing devices and dashboard configurations are preserved
+
+### Viewing Current Devices
+
+1. Go to **Settings → Devices & Services → Integrations**
+2. Find **Lippert OneControl** → click **Configure**
+3. Select **📋 View Current Devices**
 
 ## Network Setup
 
@@ -108,6 +133,8 @@ The integration automatically discovers devices based on their function ID. Comm
 | 49 | Awning Light |
 | 50 | Outdoor Light |
 | 57 | Bedroom Light |
+| 58 | Living Room Light |
+| 59 | Kitchen Light |
 | 63 | Bed Ceiling Light |
 | 122 | Scare Light |
 
@@ -118,11 +145,23 @@ The integration automatically discovers devices based on their function ID. Comm
 | 68 | Grey Tank |
 | 69 | Black Tank |
 | 70 | LP Tank |
+| 176 | LP Tank (alternate) |
 
-### Generator
+### Water Heaters (controllable)
 | Function ID | Device Name |
 |-------------|-------------|
-| 95 | Generator (control + sensors) |
+| 3 | Gas Water Heater |
+| 4 | Electric Water Heater |
+
+### Water Pump (controllable)
+| Function ID | Device Name |
+|-------------|-------------|
+| 5 | Water Pump |
+
+### Generator (controllable + sensors)
+| Function ID | Device Name |
+|-------------|-------------|
+| 95 | Generator |
 
 > **Note:** Device counters (internal IDs) vary per RV installation. The integration uses function IDs to identify device types, then auto-discovers the specific counters for your RV.
 
@@ -132,21 +171,20 @@ This integration uses the reverse-engineered Lippert OneControl protocol:
 - COBS-encoded frames over TCP
 - CRC-8/MAXIM checksums
 - TEA cipher authentication for device control
+- RelayBasicLatchingStatus2 broadcasts for state synchronization
 
 For technical details, see the [OneControl-RV-C-Protocol](https://github.com/manos/OneControl-RV-C-Protocol) repository.
 
 ## Safety Notice
 
-⚠️ **This integration controls lights and the generator.** 
+⚠️ **Use at your own risk.** This integration controls electrical systems in your RV.
 
-The following device types are intentionally **NOT** exposed for safety:
-- Water heaters (fire risk if tank is empty)
-- Slides (collision risk)
-- Awning motor (collision risk)
-- Levelers/landing gear (vehicle stability)
-- Water pump (dry-run damage)
+The following device types are intentionally **NOT** exposed:
+- **Slides** - Collision/pinch risk, requires visual confirmation
+- **Awning motor** - Collision risk, requires visual confirmation  
+- **Levelers/landing gear** - Vehicle stability risk
 
-These may be added in future versions with appropriate safety controls.
+These require physical observation during operation and are not suitable for remote control.
 
 ## Troubleshooting
 
@@ -156,13 +194,18 @@ These may be added in future versions with appropriate safety controls.
 - Check that the controller IP is correct
 - Ensure no firewall is blocking port 6969
 
-### Lights Not Responding
-- The integration requires a fresh TCP connection for each command
+### Lights/Switches Not Responding
+- The integration uses automatic retry (2 attempts) for commands
 - If commands fail, try again after a few seconds
 - The OneControl app should be closed (it may hold the connection)
 
+### State Shows Incorrect Value
+- Device states sync from broadcasts every ~7 seconds
+- Toggle the device from OneControl app and wait for HA to update
+- If state is stuck, restart Home Assistant
+
 ### Sensors Not Updating
-- Tank levels and battery voltage are polled every 30 seconds
+- Tank levels and battery voltage are polled every 7 seconds
 - Some sensors require the RV's electrical system to be active
 
 ### No Devices Found

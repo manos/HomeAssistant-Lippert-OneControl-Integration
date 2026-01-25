@@ -12,7 +12,7 @@ CONNECT_TIMEOUT: Final = 10
 COMMAND_TIMEOUT: Final = 5
 
 # Update intervals (seconds)
-SCAN_INTERVAL: Final = 15  # For sensors (reduced from 30 since single-connection reads are fast)
+SCAN_INTERVAL: Final = 7  # For sensors (fast since single-connection reads take ~3s)
 LIGHT_POLL_INTERVAL: Final = 5  # For light state
 
 # Device types from OneControl

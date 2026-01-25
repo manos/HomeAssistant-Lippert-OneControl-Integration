@@ -48,22 +48,24 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
         self._water_heater_states: dict[int, bool] = {}
 
     def init_light_states(self, counters: list[int]) -> None:
-        """Initialize light states to False (off) for all discovered lights.
+        """Register light counters for state tracking.
         
-        This prevents lights from showing as 'Unknown' before first interaction.
+        Initial state is False (off) until first broadcast is received.
+        Actual state is updated from RelayBasicLatchingStatus2 broadcasts during polling.
         """
         for counter in counters:
             if counter not in self._light_states:
-                self._light_states[counter] = False  # Assume off initially
+                self._light_states[counter] = False
 
     def init_water_heater_states(self, counters: list[int]) -> None:
-        """Initialize water heater states to False (off) for all discovered water heaters.
+        """Register water heater counters for state tracking.
         
-        This prevents water heaters from showing as 'Unknown' before first interaction.
+        Initial state is False (off) until first broadcast is received.
+        Actual state is updated from RelayBasicLatchingStatus2 broadcasts during polling.
         """
         for counter in counters:
             if counter not in self._water_heater_states:
-                self._water_heater_states[counter] = False  # Assume off initially
+                self._water_heater_states[counter] = False
 
     async def _async_update_data(self) -> OneControlData:
         """Fetch data from OneControl.
@@ -76,15 +78,21 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
             # Read ALL sensors in ONE connection (much faster!)
             sensor_data = await self._client.read_all_sensors(duration=3.0)
 
-            # For lights, we track state locally (no reliable broadcast)
-            lights = self._light_states.copy()
-            
-            # For water heaters, update from relay broadcasts if available
+            # Update device states from RelayBasicLatchingStatus2 (0x06 0x03) broadcasts
+            # Both lights and water heaters use latching relays that broadcast their state
             relay_states = sensor_data.get("relay_states", {})
+            
+            # Update light states from broadcasts
+            for counter in self._light_states:
+                if counter in relay_states:
+                    self._light_states[counter] = relay_states[counter]
+            
+            # Update water heater states from broadcasts
             for counter in self._water_heater_states:
                 if counter in relay_states:
                     self._water_heater_states[counter] = relay_states[counter]
             
+            lights = self._light_states.copy()
             water_heaters = self._water_heater_states.copy()
 
             return OneControlData(

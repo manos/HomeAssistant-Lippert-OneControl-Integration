@@ -83,6 +83,36 @@ class OneControlClient:
                 await asyncio.sleep(0.5)
         return False
 
+    async def water_heater_on(self, counter: int, retries: int = 2) -> bool:
+        """Turn on a water heater by its counter.
+        
+        Water heaters use the same latching relay protocol as lights.
+        """
+        for attempt in range(retries + 1):
+            result = await self._control_light(counter, on=True)
+            if result:
+                _LOGGER.debug("Water heater %02X turned ON", counter)
+                return True
+            if attempt < retries:
+                _LOGGER.warning("Water heater %02X ON failed, retrying (%d/%d)...", counter, attempt + 1, retries)
+                await asyncio.sleep(0.5)
+        return False
+
+    async def water_heater_off(self, counter: int, retries: int = 2) -> bool:
+        """Turn off a water heater by its counter.
+        
+        Water heaters use the same latching relay protocol as lights.
+        """
+        for attempt in range(retries + 1):
+            result = await self._control_light(counter, on=False)
+            if result:
+                _LOGGER.debug("Water heater %02X turned OFF", counter)
+                return True
+            if attempt < retries:
+                _LOGGER.warning("Water heater %02X OFF failed, retrying (%d/%d)...", counter, attempt + 1, retries)
+                await asyncio.sleep(0.5)
+        return False
+
     async def _control_light(self, counter: int, on: bool) -> bool:
         """Control a light (internal implementation)."""
         reader: Optional[asyncio.StreamReader] = None
@@ -204,6 +234,7 @@ class OneControlClient:
             "battery_voltage": None,
             "generator_hours": None,
             "generator_state": None,
+            "relay_states": {},  # counter -> bool (on/off) for latching relays like water heaters
         }
 
         try:
@@ -244,6 +275,14 @@ class OneControlClient:
                         elif len(f) >= 8 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x80:
                             operating_seconds = int.from_bytes(f[3:7], 'big')
                             result["generator_hours"] = operating_seconds / 3600.0
+
+                        # RelayBasicLatchingStatus2: 06 03 [counter] [status] ...
+                        # Status byte bit 0 = on/off state
+                        elif len(f) >= 4 and f[0] == 0x06 and f[1] == 0x03:
+                            counter = f[2]
+                            status_byte = f[3]
+                            is_on = bool(status_byte & 0x01)  # bit 0 = state
+                            result["relay_states"][counter] = is_on
 
                 except asyncio.TimeoutError:
                     continue
@@ -611,6 +650,7 @@ class OneControlClient:
         Returns dict with:
         - lights: {counter_hex: {"name": str, "func_id": int}}
         - tanks: {counter_hex: {"name": str, "func_id": int}}
+        - water_heaters: {counter_hex: {"name": str, "func_id": int}}
         - has_generator: bool
         
         This discovers actual devices present in the RV, not just
@@ -665,6 +705,9 @@ class OneControlClient:
         TANK_FUNC_IDS = {67, 68, 69, 70, 71, 176}
         GENERATOR_FUNC_ID = 95
         
+        # Water heaters - use same protocol as lights (latching relay ON/OFF)
+        WATER_HEATER_FUNC_IDS = {3, 4}  # 3=Gas, 4=Electric
+        
         # Future: Motors that need different handling
         # MOTOR_FUNC_IDS = {105, 97}  # Awning, Main Slide
 
@@ -673,6 +716,7 @@ class OneControlClient:
         
         lights: dict[str, dict] = {}
         tanks: dict[str, dict] = {}
+        water_heaters: dict[str, dict] = {}
         has_generator = False
 
         try:
@@ -722,6 +766,13 @@ class OneControlClient:
                                         "func_id": func_id,
                                     }
                                     _LOGGER.debug("Discovered tank: %s (counter=%s)", name, counter_hex)
+                            elif func_id in WATER_HEATER_FUNC_IDS:
+                                if counter_hex not in water_heaters:
+                                    water_heaters[counter_hex] = {
+                                        "name": name,
+                                        "func_id": func_id,
+                                    }
+                                    _LOGGER.debug("Discovered water heater: %s (counter=%s)", name, counter_hex)
                             elif func_id == GENERATOR_FUNC_ID:
                                 has_generator = True
                                 _LOGGER.debug("Discovered generator")
@@ -729,18 +780,19 @@ class OneControlClient:
                 except asyncio.TimeoutError:
                     continue
 
-            _LOGGER.info("Discovery complete: %d lights, %d tanks, generator=%s",
-                        len(lights), len(tanks), has_generator)
+            _LOGGER.info("Discovery complete: %d lights, %d tanks, %d water heaters, generator=%s",
+                        len(lights), len(tanks), len(water_heaters), has_generator)
             
             return {
                 "lights": lights,
                 "tanks": tanks,
+                "water_heaters": water_heaters,
                 "has_generator": has_generator,
             }
 
         except Exception as err:
             _LOGGER.error("Error during device discovery: %s", err)
-            return {"lights": {}, "tanks": {}, "has_generator": False}
+            return {"lights": {}, "tanks": {}, "water_heaters": {}, "has_generator": False}
 
         finally:
             if writer:

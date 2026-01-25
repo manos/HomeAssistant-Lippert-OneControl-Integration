@@ -11,8 +11,14 @@
         }
       },
       "confirm": {
-        "title": "Devices Discovered",
-        "description": "Found {light_count} lights and {tank_count} tanks:\n\n{discovered_devices}\n\nClick Submit to add these devices to Home Assistant."
+        "title": "Select Devices to Add",
+        "description": "{device_summary}",
+        "data": {
+          "lights": "Lights",
+          "tanks": "Tank Sensors",
+          "water_heaters": "Water Heaters",
+          "generator": "Generator"
+        }
       }
     },
     "error": {
@@ -33,11 +39,17 @@
       },
       "current_devices": {
         "title": "Current Devices",
-        "description": "Lights ({light_count}): {lights}\n\nTanks ({tank_count}): {tanks}\n\nGenerator: {generator}"
+        "description": "Lights ({light_count}): {lights}\n\nTanks ({tank_count}): {tanks}\n\nWater Heaters ({water_heater_count}): {water_heaters}\n\nGenerator: {generator}"
       },
       "confirm_new": {
         "title": "New Devices Found!",
-        "description": "Found {new_light_count} new lights and {new_tank_count} new tanks:\n\n{new_devices}\n\nClick Submit to add these devices. Your existing devices and dashboard configurations will be preserved."
+        "description": "{device_summary}\n\nYour existing devices and dashboard configurations will be preserved.",
+        "data": {
+          "lights": "New Lights",
+          "tanks": "New Tank Sensors",
+          "water_heaters": "New Water Heaters",
+          "generator": "Generator"
+        }
       }
     },
     "abort": {

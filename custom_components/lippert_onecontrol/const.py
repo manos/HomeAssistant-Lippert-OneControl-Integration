@@ -101,6 +101,7 @@ CONF_PORT: Final = "port"
 CONF_DISCOVERED_DEVICES: Final = "discovered_devices"
 CONF_DISCOVERED_LIGHTS: Final = "discovered_lights"
 CONF_DISCOVERED_TANKS: Final = "discovered_tanks"
+CONF_DISCOVERED_WATER_HEATERS: Final = "discovered_water_heaters"
 
 # Services
 SERVICE_REFRESH: Final = "refresh"

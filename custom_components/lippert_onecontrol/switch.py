@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_DISCOVERED_WATER_HEATERS,
+    CONF_DISCOVERED_WATER_PUMPS,
     DOMAIN,
     FUNCTION_NAMES,
     get_suggested_area,
@@ -47,6 +48,20 @@ async def async_setup_entry(
     # Initialize water heater states
     if water_heater_counters:
         coordinator.init_water_heater_states(water_heater_counters)
+
+    # Water pump switches
+    water_pumps = entry.data.get(CONF_DISCOVERED_WATER_PUMPS, {})
+    water_pump_counters = []
+    for counter_hex, info in water_pumps.items():
+        counter = int(counter_hex, 16)
+        water_pump_counters.append(counter)
+        name = info.get("name", f"Water Pump {counter_hex}")
+        func_id = info.get("func_id", 0)
+        entities.append(OneControlWaterPumpSwitch(coordinator, counter, name, func_id))
+    
+    # Initialize water pump states
+    if water_pump_counters:
+        coordinator.init_water_pump_states(water_pump_counters)
 
     async_add_entities(entities)
 
@@ -177,3 +192,64 @@ class OneControlWaterHeaterSwitch(CoordinatorEntity[OneControlCoordinator], Swit
             self.async_write_ha_state()
         else:
             _LOGGER.error("Failed to turn off water heater %02X", self._counter)
+
+
+class OneControlWaterPumpSwitch(CoordinatorEntity[OneControlCoordinator], SwitchEntity):
+    """Representation of Lippert OneControl water pump switch."""
+
+    _attr_device_class = SwitchDeviceClass.SWITCH
+    _attr_has_entity_name = False  # Use full name directly
+    _attr_icon = "mdi:water-pump"
+
+    def __init__(
+        self,
+        coordinator: OneControlCoordinator,
+        counter: int,
+        name: str,
+        func_id: int,
+    ) -> None:
+        """Initialize the water pump switch."""
+        super().__init__(coordinator)
+
+        self._counter = counter
+        self._func_id = func_id
+        self._attr_name = name
+        self._attr_unique_id = f"lippert_onecontrol_water_pump_{counter:02x}"
+
+        # Water pump gets its own device
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"water_pump_{counter:02x}")},
+            "name": name,
+            "manufacturer": "Lippert",
+            "model": FUNCTION_NAMES.get(func_id, f"Water Pump (func_id {func_id})"),
+            "via_device": (DOMAIN, "onecontrol_controller"),
+            "suggested_area": get_suggested_area(name) or "Utility",
+        }
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True if water pump is on."""
+        return self.coordinator.get_water_pump_state(self._counter)
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self.coordinator.last_update_success
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn on the water pump."""
+        _LOGGER.info("Turning on water pump %02X (%s)", self._counter, self._attr_name)
+        success = await self.coordinator.async_turn_water_pump_on(self._counter)
+        if success:
+            self.async_write_ha_state()
+        else:
+            _LOGGER.error("Failed to turn on water pump %02X", self._counter)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn off the water pump."""
+        _LOGGER.info("Turning off water pump %02X (%s)", self._counter, self._attr_name)
+        success = await self.coordinator.async_turn_water_pump_off(self._counter)
+        if success:
+            self.async_write_ha_state()
+        else:
+            _LOGGER.error("Failed to turn off water pump %02X", self._counter)

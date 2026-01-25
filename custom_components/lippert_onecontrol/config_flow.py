@@ -29,6 +29,7 @@ from .const import (
     CONF_DISCOVERED_LIGHTS,
     CONF_DISCOVERED_TANKS,
     CONF_DISCOVERED_WATER_HEATERS,
+    CONF_DISCOVERED_WATER_PUMPS,
 )
 from .onecontrol import OneControlClient
 
@@ -68,6 +69,7 @@ class OneControlConfigFlow(ConfigFlow, domain=DOMAIN):
         self._discovered_lights: dict = {}
         self._discovered_tanks: dict = {}
         self._discovered_water_heaters: dict = {}
+        self._discovered_water_pumps: dict = {}
         self._has_generator: bool = False
 
     @staticmethod
@@ -136,13 +138,15 @@ class OneControlConfigFlow(ConfigFlow, domain=DOMAIN):
             self._discovered_lights = discovered.get("lights", {})
             self._discovered_tanks = discovered.get("tanks", {})
             self._discovered_water_heaters = discovered.get("water_heaters", {})
+            self._discovered_water_pumps = discovered.get("water_pumps", {})
             self._has_generator = discovered.get("has_generator", False)
             
             _LOGGER.info(
-                "Discovery found: %d lights, %d tanks, %d water heaters, generator=%s",
+                "Discovery found: %d lights, %d tanks, %d water heaters, %d water pumps, generator=%s",
                 len(self._discovered_lights),
                 len(self._discovered_tanks),
                 len(self._discovered_water_heaters),
+                len(self._discovered_water_pumps),
                 self._has_generator,
             )
         except Exception as err:
@@ -161,6 +165,7 @@ class OneControlConfigFlow(ConfigFlow, domain=DOMAIN):
             selected_light_keys = user_input.get("lights", [])
             selected_tank_keys = user_input.get("tanks", [])
             selected_water_heater_keys = user_input.get("water_heaters", [])
+            selected_water_pump_keys = user_input.get("water_pumps", [])
             include_generator = user_input.get("generator", self._has_generator)
             
             # Filter devices based on selection
@@ -176,6 +181,10 @@ class OneControlConfigFlow(ConfigFlow, domain=DOMAIN):
                 k: v for k, v in self._discovered_water_heaters.items()
                 if k in selected_water_heater_keys
             }
+            selected_water_pumps = {
+                k: v for k, v in self._discovered_water_pumps.items()
+                if k in selected_water_pump_keys
+            }
             
             # Create entry with selected devices only
             return self.async_create_entry(
@@ -186,6 +195,7 @@ class OneControlConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_DISCOVERED_LIGHTS: selected_lights,
                     CONF_DISCOVERED_TANKS: selected_tanks,
                     CONF_DISCOVERED_WATER_HEATERS: selected_water_heaters,
+                    CONF_DISCOVERED_WATER_PUMPS: selected_water_pumps,
                     "has_generator": include_generator and self._has_generator,
                 },
             )
@@ -248,6 +258,24 @@ class OneControlConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             )
         
+        # Build options for water pumps
+        if self._discovered_water_pumps:
+            water_pump_options = [
+                SelectOptionDict(value=counter_hex, label=f"💧 {info['name']}")
+                for counter_hex, info in sorted(
+                    self._discovered_water_pumps.items(),
+                    key=lambda x: x[1]["name"]
+                )
+            ]
+            default_water_pumps = list(self._discovered_water_pumps.keys())
+            schema_dict[vol.Optional("water_pumps", default=default_water_pumps)] = SelectSelector(
+                SelectSelectorConfig(
+                    options=water_pump_options,
+                    multiple=True,
+                    mode=SelectSelectorMode.LIST,
+                )
+            )
+        
         # Add generator checkbox
         if self._has_generator:
             schema_dict[vol.Optional("generator", default=True)] = bool
@@ -257,6 +285,7 @@ class OneControlConfigFlow(ConfigFlow, domain=DOMAIN):
             len(self._discovered_lights) + 
             len(self._discovered_tanks) + 
             len(self._discovered_water_heaters) +
+            len(self._discovered_water_pumps) +
             (1 if self._has_generator else 0)
         )
         
@@ -278,6 +307,8 @@ class OneControlConfigFlow(ConfigFlow, domain=DOMAIN):
             summary_parts.append(f"{len(self._discovered_tanks)} tanks")
         if self._discovered_water_heaters:
             summary_parts.append(f"{len(self._discovered_water_heaters)} water heaters")
+        if self._discovered_water_pumps:
+            summary_parts.append(f"{len(self._discovered_water_pumps)} water pumps")
         if self._has_generator:
             summary_parts.append("1 generator")
         
@@ -298,6 +329,7 @@ class OneControlOptionsFlowHandler(OptionsFlow):
         self._new_lights: dict = {}
         self._new_tanks: dict = {}
         self._new_water_heaters: dict = {}
+        self._new_water_pumps: dict = {}
         self._has_new_generator: bool = False
 
     async def async_step_init(
@@ -332,16 +364,19 @@ class OneControlOptionsFlowHandler(OptionsFlow):
         current_lights = self.config_entry.data.get(CONF_DISCOVERED_LIGHTS, {})
         current_tanks = self.config_entry.data.get(CONF_DISCOVERED_TANKS, {})
         current_water_heaters = self.config_entry.data.get(CONF_DISCOVERED_WATER_HEATERS, {})
+        current_water_pumps = self.config_entry.data.get(CONF_DISCOVERED_WATER_PUMPS, {})
         has_generator = self.config_entry.data.get("has_generator", False)
 
         light_names = sorted([info["name"] for info in current_lights.values()])
         tank_names = sorted([info["name"] for info in current_tanks.values()])
         water_heater_names = sorted([info["name"] for info in current_water_heaters.values()])
+        water_pump_names = sorted([info["name"] for info in current_water_pumps.values()])
 
         # Build device list text
         lights_text = ", ".join(light_names) if light_names else "None"
         tanks_text = ", ".join(tank_names) if tank_names else "None"
         water_heaters_text = ", ".join(water_heater_names) if water_heater_names else "None"
+        water_pumps_text = ", ".join(water_pump_names) if water_pump_names else "None"
         generator_text = "Yes" if has_generator else "No"
 
         return self.async_show_form(
@@ -354,6 +389,8 @@ class OneControlOptionsFlowHandler(OptionsFlow):
                 "tanks": tanks_text,
                 "water_heater_count": str(len(water_heater_names)),
                 "water_heaters": water_heaters_text,
+                "water_pump_count": str(len(water_pump_names)),
+                "water_pumps": water_pumps_text,
                 "generator": generator_text,
             },
         )
@@ -371,6 +408,7 @@ class OneControlOptionsFlowHandler(OptionsFlow):
         current_lights = self.config_entry.data.get(CONF_DISCOVERED_LIGHTS, {})
         current_tanks = self.config_entry.data.get(CONF_DISCOVERED_TANKS, {})
         current_water_heaters = self.config_entry.data.get(CONF_DISCOVERED_WATER_HEATERS, {})
+        current_water_pumps = self.config_entry.data.get(CONF_DISCOVERED_WATER_PUMPS, {})
         current_has_generator = self.config_entry.data.get("has_generator", False)
 
         # Run discovery
@@ -380,6 +418,7 @@ class OneControlOptionsFlowHandler(OptionsFlow):
             discovered_lights = discovered.get("lights", {})
             discovered_tanks = discovered.get("tanks", {})
             discovered_water_heaters = discovered.get("water_heaters", {})
+            discovered_water_pumps = discovered.get("water_pumps", {})
             discovered_has_generator = discovered.get("has_generator", False)
         except Exception as err:
             _LOGGER.error("Rediscovery failed: %s", err)
@@ -398,10 +437,14 @@ class OneControlOptionsFlowHandler(OptionsFlow):
             k: v for k, v in discovered_water_heaters.items()
             if k not in current_water_heaters
         }
+        self._new_water_pumps = {
+            k: v for k, v in discovered_water_pumps.items()
+            if k not in current_water_pumps
+        }
         self._has_new_generator = discovered_has_generator and not current_has_generator
 
         # Check if we found anything new
-        if not self._new_lights and not self._new_tanks and not self._new_water_heaters and not self._has_new_generator:
+        if not self._new_lights and not self._new_tanks and not self._new_water_heaters and not self._new_water_pumps and not self._has_new_generator:
             return self.async_abort(reason="no_new_devices")
 
         # Show what we found
@@ -416,6 +459,7 @@ class OneControlOptionsFlowHandler(OptionsFlow):
             selected_light_keys = user_input.get("lights", [])
             selected_tank_keys = user_input.get("tanks", [])
             selected_water_heater_keys = user_input.get("water_heaters", [])
+            selected_water_pump_keys = user_input.get("water_pumps", [])
             include_new_generator = user_input.get("generator", self._has_new_generator)
             
             # Filter new devices based on selection
@@ -431,17 +475,23 @@ class OneControlOptionsFlowHandler(OptionsFlow):
                 k: v for k, v in self._new_water_heaters.items()
                 if k in selected_water_heater_keys
             }
+            selected_new_water_pumps = {
+                k: v for k, v in self._new_water_pumps.items()
+                if k in selected_water_pump_keys
+            }
             
             # Merge selected new devices with existing
             current_lights = dict(self.config_entry.data.get(CONF_DISCOVERED_LIGHTS, {}))
             current_tanks = dict(self.config_entry.data.get(CONF_DISCOVERED_TANKS, {}))
             current_water_heaters = dict(self.config_entry.data.get(CONF_DISCOVERED_WATER_HEATERS, {}))
+            current_water_pumps = dict(self.config_entry.data.get(CONF_DISCOVERED_WATER_PUMPS, {}))
             current_has_generator = self.config_entry.data.get("has_generator", False)
 
             # Add selected new devices
             current_lights.update(selected_new_lights)
             current_tanks.update(selected_new_tanks)
             current_water_heaters.update(selected_new_water_heaters)
+            current_water_pumps.update(selected_new_water_pumps)
             new_has_generator = current_has_generator or (include_new_generator and self._has_new_generator)
 
             # Update the config entry data
@@ -450,6 +500,7 @@ class OneControlOptionsFlowHandler(OptionsFlow):
                 CONF_DISCOVERED_LIGHTS: current_lights,
                 CONF_DISCOVERED_TANKS: current_tanks,
                 CONF_DISCOVERED_WATER_HEATERS: current_water_heaters,
+                CONF_DISCOVERED_WATER_PUMPS: current_water_pumps,
                 "has_generator": new_has_generator,
             }
 
@@ -459,10 +510,11 @@ class OneControlOptionsFlowHandler(OptionsFlow):
             )
 
             _LOGGER.info(
-                "Added %d new lights, %d new tanks, %d new water heaters, generator=%s",
+                "Added %d new lights, %d new tanks, %d new water heaters, %d new water pumps, generator=%s",
                 len(selected_new_lights),
                 len(selected_new_tanks),
                 len(selected_new_water_heaters),
+                len(selected_new_water_pumps),
                 include_new_generator and self._has_new_generator,
             )
 
@@ -526,6 +578,24 @@ class OneControlOptionsFlowHandler(OptionsFlow):
                 )
             )
         
+        # Build options for new water pumps
+        if self._new_water_pumps:
+            water_pump_options = [
+                SelectOptionDict(value=counter_hex, label=f"💧 {info['name']}")
+                for counter_hex, info in sorted(
+                    self._new_water_pumps.items(),
+                    key=lambda x: x[1]["name"]
+                )
+            ]
+            default_water_pumps = list(self._new_water_pumps.keys())
+            schema_dict[vol.Optional("water_pumps", default=default_water_pumps)] = SelectSelector(
+                SelectSelectorConfig(
+                    options=water_pump_options,
+                    multiple=True,
+                    mode=SelectSelectorMode.LIST,
+                )
+            )
+        
         # Add generator checkbox
         if self._has_new_generator:
             schema_dict[vol.Optional("generator", default=True)] = bool
@@ -538,6 +608,8 @@ class OneControlOptionsFlowHandler(OptionsFlow):
             summary_parts.append(f"{len(self._new_tanks)} tanks")
         if self._new_water_heaters:
             summary_parts.append(f"{len(self._new_water_heaters)} water heaters")
+        if self._new_water_pumps:
+            summary_parts.append(f"{len(self._new_water_pumps)} water pumps")
         if self._has_new_generator:
             summary_parts.append("1 generator")
 

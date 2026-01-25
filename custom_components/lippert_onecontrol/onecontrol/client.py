@@ -113,6 +113,36 @@ class OneControlClient:
                 await asyncio.sleep(0.5)
         return False
 
+    async def water_pump_on(self, counter: int, retries: int = 2) -> bool:
+        """Turn on the water pump by its counter.
+        
+        Water pump uses the same latching relay protocol as lights.
+        """
+        for attempt in range(retries + 1):
+            result = await self._control_light(counter, on=True)
+            if result:
+                _LOGGER.debug("Water pump %02X turned ON", counter)
+                return True
+            if attempt < retries:
+                _LOGGER.warning("Water pump %02X ON failed, retrying (%d/%d)...", counter, attempt + 1, retries)
+                await asyncio.sleep(0.5)
+        return False
+
+    async def water_pump_off(self, counter: int, retries: int = 2) -> bool:
+        """Turn off the water pump by its counter.
+        
+        Water pump uses the same latching relay protocol as lights.
+        """
+        for attempt in range(retries + 1):
+            result = await self._control_light(counter, on=False)
+            if result:
+                _LOGGER.debug("Water pump %02X turned OFF", counter)
+                return True
+            if attempt < retries:
+                _LOGGER.warning("Water pump %02X OFF failed, retrying (%d/%d)...", counter, attempt + 1, retries)
+                await asyncio.sleep(0.5)
+        return False
+
     async def _control_light(self, counter: int, on: bool) -> bool:
         """Control a light (internal implementation)."""
         reader: Optional[asyncio.StreamReader] = None
@@ -708,6 +738,9 @@ class OneControlClient:
         # Water heaters - use same protocol as lights (latching relay ON/OFF)
         WATER_HEATER_FUNC_IDS = {3, 4}  # 3=Gas, 4=Electric
         
+        # Water pump - uses same protocol as lights (latching relay ON/OFF)
+        WATER_PUMP_FUNC_ID = 5
+        
         # Future: Motors that need different handling
         # MOTOR_FUNC_IDS = {105, 97}  # Awning, Main Slide
 
@@ -717,6 +750,7 @@ class OneControlClient:
         lights: dict[str, dict] = {}
         tanks: dict[str, dict] = {}
         water_heaters: dict[str, dict] = {}
+        water_pumps: dict[str, dict] = {}
         has_generator = False
 
         try:
@@ -773,6 +807,13 @@ class OneControlClient:
                                         "func_id": func_id,
                                     }
                                     _LOGGER.debug("Discovered water heater: %s (counter=%s)", name, counter_hex)
+                            elif func_id == WATER_PUMP_FUNC_ID:
+                                if counter_hex not in water_pumps:
+                                    water_pumps[counter_hex] = {
+                                        "name": name,
+                                        "func_id": func_id,
+                                    }
+                                    _LOGGER.debug("Discovered water pump: %s (counter=%s)", name, counter_hex)
                             elif func_id == GENERATOR_FUNC_ID:
                                 has_generator = True
                                 _LOGGER.debug("Discovered generator")
@@ -780,19 +821,20 @@ class OneControlClient:
                 except asyncio.TimeoutError:
                     continue
 
-            _LOGGER.info("Discovery complete: %d lights, %d tanks, %d water heaters, generator=%s",
-                        len(lights), len(tanks), len(water_heaters), has_generator)
+            _LOGGER.info("Discovery complete: %d lights, %d tanks, %d water heaters, %d water pumps, generator=%s",
+                        len(lights), len(tanks), len(water_heaters), len(water_pumps), has_generator)
             
             return {
                 "lights": lights,
                 "tanks": tanks,
                 "water_heaters": water_heaters,
+                "water_pumps": water_pumps,
                 "has_generator": has_generator,
             }
 
         except Exception as err:
             _LOGGER.error("Error during device discovery: %s", err)
-            return {"lights": {}, "tanks": {}, "water_heaters": {}, "has_generator": False}
+            return {"lights": {}, "tanks": {}, "water_heaters": {}, "water_pumps": {}, "has_generator": False}
 
         finally:
             if writer:

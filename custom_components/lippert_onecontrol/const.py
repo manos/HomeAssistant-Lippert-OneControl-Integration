@@ -102,6 +102,7 @@ CONF_DISCOVERED_DEVICES: Final = "discovered_devices"
 CONF_DISCOVERED_LIGHTS: Final = "discovered_lights"
 CONF_DISCOVERED_TANKS: Final = "discovered_tanks"
 CONF_DISCOVERED_WATER_HEATERS: Final = "discovered_water_heaters"
+CONF_DISCOVERED_WATER_PUMPS: Final = "discovered_water_pumps"
 
 # Services
 SERVICE_REFRESH: Final = "refresh"

@@ -23,6 +23,7 @@ class OneControlData:
     lights: dict[int, bool]  # counter -> on/off state
     tanks: dict[int, int]  # counter -> level percentage
     water_heaters: dict[int, bool]  # counter -> on/off state
+    water_pumps: dict[int, bool]  # counter -> on/off state
     battery_voltage: float | None
     generator_hours: float | None
     generator_state: int | None  # 0=Off, 1=Priming, 2=Starting, 3=Running, 4=Stopping
@@ -46,6 +47,8 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
         self._light_states: dict[int, bool] = {}
         # Initialize water heater states - will be populated by init_water_heater_states()
         self._water_heater_states: dict[int, bool] = {}
+        # Initialize water pump states - will be populated by init_water_pump_states()
+        self._water_pump_states: dict[int, bool] = {}
 
     def init_light_states(self, counters: list[int]) -> None:
         """Register light counters for state tracking.
@@ -66,6 +69,16 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
         for counter in counters:
             if counter not in self._water_heater_states:
                 self._water_heater_states[counter] = False
+
+    def init_water_pump_states(self, counters: list[int]) -> None:
+        """Register water pump counters for state tracking.
+        
+        Initial state is False (off) until first broadcast is received.
+        Actual state is updated from RelayBasicLatchingStatus2 broadcasts during polling.
+        """
+        for counter in counters:
+            if counter not in self._water_pump_states:
+                self._water_pump_states[counter] = False
 
     async def _async_update_data(self) -> OneControlData:
         """Fetch data from OneControl.
@@ -92,13 +105,20 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
                 if counter in relay_states:
                     self._water_heater_states[counter] = relay_states[counter]
             
+            # Update water pump states from broadcasts
+            for counter in self._water_pump_states:
+                if counter in relay_states:
+                    self._water_pump_states[counter] = relay_states[counter]
+            
             lights = self._light_states.copy()
             water_heaters = self._water_heater_states.copy()
+            water_pumps = self._water_pump_states.copy()
 
             return OneControlData(
                 lights=lights,
                 tanks=sensor_data.get("tanks", {}),
                 water_heaters=water_heaters,
+                water_pumps=water_pumps,
                 battery_voltage=sensor_data.get("battery_voltage"),
                 generator_hours=sensor_data.get("generator_hours"),
                 generator_state=sensor_data.get("generator_state"),
@@ -182,3 +202,29 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
     def get_water_heater_state(self, counter: int) -> bool | None:
         """Get the tracked state of a water heater."""
         return self._water_heater_states.get(counter)
+
+    async def async_turn_water_pump_on(self, counter: int) -> bool:
+        """Turn on a water pump."""
+        try:
+            result = await self._client.water_pump_on(counter)
+            if result:
+                self._water_pump_states[counter] = True
+            return result
+        except Exception as err:
+            _LOGGER.error("Failed to turn on water pump %02X: %s", counter, err)
+            return False
+
+    async def async_turn_water_pump_off(self, counter: int) -> bool:
+        """Turn off a water pump."""
+        try:
+            result = await self._client.water_pump_off(counter)
+            if result:
+                self._water_pump_states[counter] = False
+            return result
+        except Exception as err:
+            _LOGGER.error("Failed to turn off water pump %02X: %s", counter, err)
+            return False
+
+    def get_water_pump_state(self, counter: int) -> bool | None:
+        """Get the tracked state of a water pump."""
+        return self._water_pump_states.get(counter)

@@ -16,7 +16,7 @@ import struct
 import time
 from typing import Optional
 
-from .protocol import cobs_encode, decode_frames, tea_encrypt
+from .protocol import cobs_encode, crc8_maxim, decode_frames, tea_encrypt
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -145,13 +145,14 @@ class OneControlClient:
 
     # ========== LEVELER CONTROL ==========
     # Leveler uses button-press simulation (frame type 0x03)
-    # NO authentication required (unlike lights/water heaters)
+    # Analysis says NO auth required, but captures show seed/key exchange
+    # Try simplified flow: registration -> button (skip seed/key)
 
     async def _send_leveler_button(self, button: int, device: int = 0x01) -> bool:
         """Send a leveler button press command.
         
         Leveler uses frame type 0x03 with button simulation.
-        NO seed/key authentication is required.
+        Based on captures: send registration first, then button command.
         
         Args:
             button: Button code (0x10=AutoLevel, 0x20=Retract, 0x40=Enter, 0x80=Cancel)
@@ -165,24 +166,41 @@ class OneControlClient:
                 timeout=10.0
             )
 
-            async def send(payload: bytes) -> None:
-                writer.write(cobs_encode(payload))
-                await writer.drain()
+            # Skip identity registration - just send leveler commands directly
+            # Use two-byte connection like capture: d4 e6 -> d6 e6
+            # We'll use 40 40 -> 42 40
+            conn_hi = 0x40
+            conn_lo = 0x40
+            leveler_id = 0xaa  # ID from capture
+            
+            # Build registration frame (8 bytes)
+            reg_frame = bytes([0x02, UNIVERSAL_PROTOCOL, conn_hi, conn_lo, 0x44, 0x02, 0x04, leveler_id])
+            
+            # Build button frame
+            btn_frame = bytes([0x03, UNIVERSAL_PROTOCOL, conn_hi + 2, conn_lo, 0x41, device, 0x02, button])
+            
+            # Send as compound packet: both COBS-encoded frames in one TCP write
+            # This matches how the capture shows them being sent together
+            encoded_reg = cobs_encode(reg_frame)
+            encoded_btn = cobs_encode(btn_frame)
+            compound = encoded_reg + encoded_btn
+            _LOGGER.debug("Leveler compound frame: %s", compound.hex())
+            writer.write(compound)
+            await writer.drain()
+            await asyncio.sleep(0.3)
 
-            # Register
-            await send(bytes([0x01, 0x06, UNIVERSAL_SESSION, 0x00]))
-            await asyncio.sleep(0.1)
-            await send(bytes([0x08, 0x00, UNIVERSAL_SESSION, 0x00]) + DEFAULT_UUID)
-            await asyncio.sleep(0.2)
+            # Check for ack
+            try:
+                response = await asyncio.wait_for(reader.read(8192), timeout=0.5)
+                if response:
+                    frames = decode_frames(response)
+                    for f in frames:
+                        if len(f) > 0 and f[0] == 0x13:
+                            _LOGGER.debug("Leveler ACK received: %s", f.hex())
+            except asyncio.TimeoutError:
+                pass
 
-            # Leveler button command: 03 80 7a 01 41 [device] 02 [button]
-            # Frame type 0x03 (NOT 0x00 like lights)
-            # table_id=0x41, screen=0x02
-            payload = bytes([0x03, 0x80, 0x7a, 0x01, 0x41, device, 0x02, button])
-            await send(payload)
-            await asyncio.sleep(0.2)
-
-            _LOGGER.debug("Leveler button 0x%02X sent (device=0x%02X)", button, device)
+            _LOGGER.info("Leveler button 0x%02X sent", button)
             return True
 
         except asyncio.TimeoutError:

@@ -33,7 +33,8 @@ UNIVERSAL_CONN = 0x40
 UNIVERSAL_DEVICE = 0x04
 
 # Generator-specific constants (uses different protocol!)
-GENERATOR_COUNTER = 0x87
+# Note: Counter varies by RV installation - 0x5c is common, 0x87 was original assumption
+GENERATOR_COUNTER = 0x5c
 GENERATOR_PROTOCOL = 0x81
 GENERATOR_CONN = 0xe8
 
@@ -430,8 +431,9 @@ class OneControlClient:
                             level = f[3]
                             result["tanks"][counter] = level
 
-                        # Generator Genie status: 05 03 87 [state] [volt_hi] [volt_lo] ...
-                        elif len(f) >= 6 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x87:
+                        # Generator Genie status: 05 03 [counter] [state] [volt_hi] [volt_lo] ...
+                        # Counter varies by RV: 0x5c, 0x43, 0x87, etc. Accept any 05 03 frame with valid voltage
+                        elif len(f) >= 6 and f[0] == 0x05 and f[1] == 0x03 and f[2] in (0x5c, 0x43, 0x87):
                             result["generator_state"] = f[3]
                             result["battery_voltage"] = f[4] + f[5] / 256.0
 

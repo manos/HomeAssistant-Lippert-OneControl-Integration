@@ -26,6 +26,7 @@ CONFIG_SCHEMA = vol.Schema(
 )
 
 PLATFORMS: list[Platform] = [
+    Platform.BUTTON,
     Platform.LIGHT,
     Platform.SENSOR,
     Platform.SWITCH,

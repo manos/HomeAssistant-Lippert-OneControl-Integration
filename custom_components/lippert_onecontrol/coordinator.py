@@ -228,3 +228,29 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
     def get_water_pump_state(self, counter: int) -> bool | None:
         """Get the tracked state of a water pump."""
         return self._water_pump_states.get(counter)
+
+    # ========== LEVELER CONTROL ==========
+
+    async def async_leveler_auto_level(self) -> bool:
+        """Start auto-leveling sequence."""
+        try:
+            return await self._client.leveler_auto_level()
+        except Exception as err:
+            _LOGGER.error("Failed to start auto-level: %s", err)
+            return False
+
+    async def async_leveler_retract(self) -> bool:
+        """Retract all leveler jacks."""
+        try:
+            return await self._client.leveler_retract()
+        except Exception as err:
+            _LOGGER.error("Failed to retract leveler: %s", err)
+            return False
+
+    async def async_leveler_cancel(self) -> bool:
+        """Cancel current leveler operation."""
+        try:
+            return await self._client.leveler_cancel()
+        except Exception as err:
+            _LOGGER.error("Failed to cancel leveler: %s", err)
+            return False

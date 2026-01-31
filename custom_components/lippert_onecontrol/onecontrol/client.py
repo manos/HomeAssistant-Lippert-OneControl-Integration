@@ -143,6 +143,122 @@ class OneControlClient:
                 await asyncio.sleep(0.5)
         return False
 
+    # ========== LEVELER CONTROL ==========
+    # Leveler uses button-press simulation (frame type 0x03)
+    # NO authentication required (unlike lights/water heaters)
+
+    async def _send_leveler_button(self, button: int, device: int = 0x01) -> bool:
+        """Send a leveler button press command.
+        
+        Leveler uses frame type 0x03 with button simulation.
+        NO seed/key authentication is required.
+        
+        Args:
+            button: Button code (0x10=AutoLevel, 0x20=Retract, 0x40=Enter, 0x80=Cancel)
+            device: Device ID (0x01 for button press, 0x08 for Enter confirmation)
+        """
+        writer: Optional[asyncio.StreamWriter] = None
+
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port),
+                timeout=10.0
+            )
+
+            async def send(payload: bytes) -> None:
+                writer.write(cobs_encode(payload))
+                await writer.drain()
+
+            # Register
+            await send(bytes([0x01, 0x06, UNIVERSAL_SESSION, 0x00]))
+            await asyncio.sleep(0.1)
+            await send(bytes([0x08, 0x00, UNIVERSAL_SESSION, 0x00]) + DEFAULT_UUID)
+            await asyncio.sleep(0.2)
+
+            # Leveler button command: 03 80 7a 01 41 [device] 02 [button]
+            # Frame type 0x03 (NOT 0x00 like lights)
+            # table_id=0x41, screen=0x02
+            payload = bytes([0x03, 0x80, 0x7a, 0x01, 0x41, device, 0x02, button])
+            await send(payload)
+            await asyncio.sleep(0.2)
+
+            _LOGGER.debug("Leveler button 0x%02X sent (device=0x%02X)", button, device)
+            return True
+
+        except asyncio.TimeoutError:
+            _LOGGER.error("Timeout sending leveler button")
+            return False
+        except Exception as err:
+            _LOGGER.error("Error sending leveler button: %s", err)
+            return False
+
+        finally:
+            if writer:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+
+    async def leveler_auto_level(self) -> bool:
+        """Start auto-leveling sequence.
+        
+        Sends AutoLevel button (0x10) followed by Enter confirmation (0x40).
+        The leveler will automatically level the RV.
+        
+        Note: Requires ACC power ON and parking brake engaged.
+        """
+        _LOGGER.info("Starting auto-level sequence")
+        
+        # Press AutoLevel button
+        if not await self._send_leveler_button(0x10, device=0x01):
+            return False
+        
+        await asyncio.sleep(0.3)
+        
+        # Press Enter to confirm
+        if not await self._send_leveler_button(0x40, device=0x08):
+            return False
+        
+        _LOGGER.info("Auto-level sequence initiated")
+        return True
+
+    async def leveler_retract(self) -> bool:
+        """Retract all leveler jacks.
+        
+        Sends Retract button (0x20) followed by Enter confirmation (0x40).
+        All jacks will retract to stored position.
+        
+        Note: Requires ACC power ON and parking brake engaged.
+        """
+        _LOGGER.info("Starting retract sequence")
+        
+        # Press Retract button
+        if not await self._send_leveler_button(0x20, device=0x01):
+            return False
+        
+        await asyncio.sleep(0.3)
+        
+        # Press Enter to confirm
+        if not await self._send_leveler_button(0x40, device=0x08):
+            return False
+        
+        _LOGGER.info("Retract sequence initiated")
+        return True
+
+    async def leveler_cancel(self) -> bool:
+        """Cancel current leveler operation.
+        
+        Sends Cancel button (0x80) to stop any ongoing leveling operation.
+        """
+        _LOGGER.info("Cancelling leveler operation")
+        
+        if not await self._send_leveler_button(0x80, device=0x01):
+            return False
+        
+        _LOGGER.info("Leveler operation cancelled")
+        return True
+
     async def _control_light(self, counter: int, on: bool) -> bool:
         """Control a light (internal implementation)."""
         reader: Optional[asyncio.StreamReader] = None

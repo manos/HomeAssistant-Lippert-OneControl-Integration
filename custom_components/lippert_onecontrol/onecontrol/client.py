@@ -33,7 +33,7 @@ UNIVERSAL_CONN = 0x40
 UNIVERSAL_DEVICE = 0x04
 
 # Generator-specific constants (uses different protocol!)
-GENERATOR_COUNTER = 0x87
+GENERATOR_COUNTER = 0x24
 GENERATOR_PROTOCOL = 0x81
 GENERATOR_CONN = 0xe8
 
@@ -431,7 +431,7 @@ class OneControlClient:
                             result["tanks"][counter] = level
 
                         # Generator Genie status: 05 03 87 [state] [volt_hi] [volt_lo] ...
-                        elif len(f) >= 6 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x87:
+                        elif len(f) >= 6 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x24:
                             result["generator_state"] = f[3]
                             result["battery_voltage"] = f[4] + f[5] / 256.0
 
@@ -561,7 +561,7 @@ class OneControlClient:
                     frames = decode_frames(data)
                     for f in frames:
                         # Generator Genie: 05 03 87 [state] [volt_hi] [volt_lo] ...
-                        if len(f) >= 6 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x87:
+                        if len(f) >= 6 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x24:
                             voltage = f[4] + f[5] / 256.0
                             return voltage
 
@@ -677,7 +677,7 @@ class OneControlClient:
                     frames = decode_frames(data)
                     for f in frames:
                         # Generator Genie: 05 03 87 [state] ...
-                        if len(f) >= 4 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x87:
+                        if len(f) >= 4 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x24:
                             return f[3]
 
                 except asyncio.TimeoutError:
@@ -756,7 +756,7 @@ class OneControlClient:
                 frames = await recv()
                 for f in frames:
                     # Look for 06 82 ... 42 00 04 [seed]
-                    if len(f) >= 11 and f[0] == 0x06 and f[1] == 0x82 and f[4] == 0x42:
+                    if len(f) >= 11 and f[0] == 0x06 and f[1] in (0x80, 0x82) and f[4] == 0x42:
                         seed = int.from_bytes(f[7:11], 'big')
                         break
                 if seed:

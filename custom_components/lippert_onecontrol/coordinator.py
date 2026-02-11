@@ -10,7 +10,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, SCAN_INTERVAL
+from .const import DOMAIN, SCAN_INTERVAL, DEFAULT_GENERATOR_COUNTER
 from .onecontrol import OneControlClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,6 +49,8 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
         self._water_heater_states: dict[int, bool] = {}
         # Initialize water pump states - will be populated by init_water_pump_states()
         self._water_pump_states: dict[int, bool] = {}
+        # Generator counters - will be populated by init_generator_counters()
+        self._generator_counters: list[int] = []
 
     def init_light_states(self, counters: list[int]) -> None:
         """Register light counters for state tracking.
@@ -80,6 +82,16 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
             if counter not in self._water_pump_states:
                 self._water_pump_states[counter] = False
 
+    def init_generator_counters(self, counters: list[int]) -> None:
+        """Register generator counters discovered from 08 02 broadcasts.
+        
+        These counters are used for control commands.
+        For status reading, we use a flexible hybrid approach that accepts
+        generator status from any known counter.
+        """
+        self._generator_counters = counters
+        _LOGGER.debug("Initialized generator counters: %s", [f"0x{c:02x}" for c in counters])
+
     async def _async_update_data(self) -> OneControlData:
         """Fetch data from OneControl.
         
@@ -89,7 +101,11 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
         """
         try:
             # Read ALL sensors in ONE connection (much faster!)
-            sensor_data = await self._client.read_all_sensors(duration=3.0)
+            # Pass discovered generator counters to help identify status frames
+            sensor_data = await self._client.read_all_sensors(
+                duration=3.0,
+                generator_counters=self._generator_counters if self._generator_counters else None
+            )
 
             # Update device states from RelayBasicLatchingStatus2 (0x06 0x03) broadcasts
             # Both lights and water heaters use latching relays that broadcast their state
@@ -156,20 +172,54 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
         return self._light_states.get(counter)
 
     async def async_generator_on(self) -> bool:
-        """Turn on the generator."""
-        try:
-            return await self._client.generator_on()
-        except Exception as err:
-            _LOGGER.error("Failed to turn on generator: %s", err)
-            return False
+        """Turn on the generator.
+        
+        Tries discovered counters first, then falls back to default.
+        The control counter may differ from the discovery counter, so we
+        try ALL known counters until one succeeds.
+        """
+        counters_to_try = list(self._generator_counters) if self._generator_counters else []
+        # Always include the default as a fallback
+        if DEFAULT_GENERATOR_COUNTER not in counters_to_try:
+            counters_to_try.append(DEFAULT_GENERATOR_COUNTER)
+        
+        for counter in counters_to_try:
+            try:
+                _LOGGER.debug("Trying generator ON with counter 0x%02x", counter)
+                result = await self._client.generator_on(counter)
+                if result:
+                    return True
+            except Exception as err:
+                _LOGGER.debug("Generator ON failed with counter 0x%02x: %s", counter, err)
+        
+        _LOGGER.error("Failed to turn on generator (tried counters: %s)", 
+                      [f"0x{c:02x}" for c in counters_to_try])
+        return False
 
     async def async_generator_off(self) -> bool:
-        """Turn off the generator."""
-        try:
-            return await self._client.generator_off()
-        except Exception as err:
-            _LOGGER.error("Failed to turn off generator: %s", err)
-            return False
+        """Turn off the generator.
+        
+        Tries discovered counters first, then falls back to default.
+        The control counter may differ from the discovery counter, so we
+        try ALL known counters until one succeeds.
+        """
+        counters_to_try = list(self._generator_counters) if self._generator_counters else []
+        # Always include the default as a fallback
+        if DEFAULT_GENERATOR_COUNTER not in counters_to_try:
+            counters_to_try.append(DEFAULT_GENERATOR_COUNTER)
+        
+        for counter in counters_to_try:
+            try:
+                _LOGGER.debug("Trying generator OFF with counter 0x%02x", counter)
+                result = await self._client.generator_off(counter)
+                if result:
+                    return True
+            except Exception as err:
+                _LOGGER.debug("Generator OFF failed with counter 0x%02x: %s", counter, err)
+        
+        _LOGGER.error("Failed to turn off generator (tried counters: %s)", 
+                      [f"0x{c:02x}" for c in counters_to_try])
+        return False
 
     def get_generator_state(self) -> int | None:
         """Get the current generator state."""

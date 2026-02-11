@@ -11,6 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    CONF_DISCOVERED_GENERATORS,
     CONF_DISCOVERED_WATER_HEATERS,
     CONF_DISCOVERED_WATER_PUMPS,
     DOMAIN,
@@ -32,8 +33,13 @@ async def async_setup_entry(
 
     entities: list[SwitchEntity] = []
 
-    # Generator switch
-    entities.append(OneControlGeneratorSwitch(coordinator))
+    # Generator switch - only if generators were discovered
+    discovered_generators = entry.data.get(CONF_DISCOVERED_GENERATORS, {})
+    has_generator_legacy = entry.data.get("has_generator", False)  # Backward compat
+    if discovered_generators or has_generator_legacy:
+        entities.append(OneControlGeneratorSwitch(coordinator))
+        _LOGGER.debug("Adding generator switch (discovered: %s, legacy: %s)", 
+                     bool(discovered_generators), has_generator_legacy)
 
     # Water heater switches
     water_heaters = entry.data.get(CONF_DISCOVERED_WATER_HEATERS, {})

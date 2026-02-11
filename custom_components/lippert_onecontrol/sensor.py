@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, CONF_DISCOVERED_TANKS, get_suggested_area
+from .const import DOMAIN, CONF_DISCOVERED_TANKS, CONF_DISCOVERED_GENERATORS, get_suggested_area
 from .coordinator import OneControlCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,12 +43,17 @@ async def async_setup_entry(
             )
         )
 
-    # Battery voltage sensor (controller-level)
-    entities.append(OneControlBatteryVoltageSensor(coordinator))
-
-    # Generator sensors (grouped under Generator device)
-    entities.append(OneControlGeneratorHoursSensor(coordinator))
-    entities.append(OneControlGeneratorStateSensor(coordinator))
+    # Generator sensors - only if generators were discovered
+    # Note: Battery voltage also comes from generator status frames,
+    # so we add it alongside generator sensors
+    discovered_generators = entry.data.get(CONF_DISCOVERED_GENERATORS, {})
+    has_generator_legacy = entry.data.get("has_generator", False)  # Backward compat
+    if discovered_generators or has_generator_legacy:
+        entities.append(OneControlBatteryVoltageSensor(coordinator))
+        entities.append(OneControlGeneratorHoursSensor(coordinator))
+        entities.append(OneControlGeneratorStateSensor(coordinator))
+        _LOGGER.debug("Adding generator sensors (discovered: %s, legacy: %s)", 
+                     bool(discovered_generators), has_generator_legacy)
 
     async_add_entities(entities)
 

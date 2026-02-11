@@ -92,8 +92,9 @@ def get_suggested_area(name: str) -> str | None:
     return None
 
 
-# Generator counter
-GENERATOR_COUNTER: Final = 0x87
+# Generator counter - DEPRECATED: now discovered dynamically
+# Kept as fallback for backward compatibility with existing config entries
+DEFAULT_GENERATOR_COUNTER: Final = 0x24
 
 # Config flow
 CONF_HOST: Final = "host"
@@ -103,6 +104,7 @@ CONF_DISCOVERED_LIGHTS: Final = "discovered_lights"
 CONF_DISCOVERED_TANKS: Final = "discovered_tanks"
 CONF_DISCOVERED_WATER_HEATERS: Final = "discovered_water_heaters"
 CONF_DISCOVERED_WATER_PUMPS: Final = "discovered_water_pumps"
+CONF_DISCOVERED_GENERATORS: Final = "discovered_generators"
 
 # Services
 SERVICE_REFRESH: Final = "refresh"

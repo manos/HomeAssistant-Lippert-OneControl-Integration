@@ -18,7 +18,7 @@
           "tanks": "Tank Sensors",
           "water_heaters": "Water Heaters",
           "water_pumps": "Water Pumps",
-          "generator": "Generator"
+          "generators": "Generators"
         }
       }
     },
@@ -40,7 +40,7 @@
       },
       "current_devices": {
         "title": "Current Devices",
-        "description": "Lights ({light_count}): {lights}\n\nTanks ({tank_count}): {tanks}\n\nWater Heaters ({water_heater_count}): {water_heaters}\n\nWater Pumps ({water_pump_count}): {water_pumps}\n\nGenerator: {generator}"
+        "description": "Lights ({light_count}): {lights}\n\nTanks ({tank_count}): {tanks}\n\nWater Heaters ({water_heater_count}): {water_heaters}\n\nWater Pumps ({water_pump_count}): {water_pumps}\n\nGenerators ({generator_count}): {generators}"
       },
       "confirm_new": {
         "title": "New Devices Found!",
@@ -50,7 +50,7 @@
           "tanks": "New Tank Sensors",
           "water_heaters": "New Water Heaters",
           "water_pumps": "New Water Pumps",
-          "generator": "Generator"
+          "generators": "New Generators"
         }
       }
     },

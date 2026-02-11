@@ -33,6 +33,8 @@ UNIVERSAL_CONN = 0x40
 UNIVERSAL_DEVICE = 0x04
 
 # Generator-specific constants (uses different protocol!)
+# Counter varies by RV installation - discovered dynamically at config time.
+# This value is only used as a fallback default in function signatures.
 GENERATOR_COUNTER = 0x24
 GENERATOR_PROTOCOL = 0x81
 GENERATOR_CONN = 0xe8
@@ -377,12 +379,18 @@ class OneControlClient:
                 except Exception:
                     pass
 
-    async def read_all_sensors(self, duration: float = 3.0) -> dict:
+    async def read_all_sensors(self, duration: float = 3.0, generator_counters: list[int] | None = None) -> dict:
         """
         Read ALL sensor data in a SINGLE connection.
         
         This is much more efficient than calling individual read methods,
         which each open separate connections.
+        
+        HYBRID APPROACH for generator status:
+        Generator status frames (05 03) can come from different counters than what
+        gets discovered via 08 02 registration frames. We use a flexible approach:
+        - Accept status from any of the known generator counters
+        - Plus any additional counters passed via generator_counters parameter
         
         Returns dict with:
         - tanks: {counter: level_percentage}
@@ -400,6 +408,12 @@ class OneControlClient:
             "generator_state": None,
             "relay_states": {},  # counter -> bool (on/off) for latching relays like water heaters
         }
+        
+        # Known generator status counters (hybrid approach)
+        # These are counters where 05 03 generator status frames have been observed
+        known_gen_counters = {0x24, 0x5c, 0x43, 0x87}
+        if generator_counters:
+            known_gen_counters.update(generator_counters)
 
         try:
             reader, writer = await asyncio.wait_for(
@@ -430,15 +444,17 @@ class OneControlClient:
                             level = f[3]
                             result["tanks"][counter] = level
 
-                        # Generator Genie status: 05 03 87 [state] [volt_hi] [volt_lo] ...
-                        elif len(f) >= 6 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x24:
-                            result["generator_state"] = f[3]
-                            result["battery_voltage"] = f[4] + f[5] / 256.0
-
                         # Hour meter: 05 03 80 [uint32 BE seconds] [status]
+                        # MUST come before generator status check to avoid counter 0x80 collision
                         elif len(f) >= 8 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x80:
                             operating_seconds = int.from_bytes(f[3:7], 'big')
                             result["generator_hours"] = operating_seconds / 3600.0
+
+                        # Generator Genie status: 05 03 [counter] [state] [volt_hi] [volt_lo] ...
+                        # Counter varies by RV - use hybrid approach accepting known counters
+                        elif len(f) >= 6 and f[0] == 0x05 and f[1] == 0x03 and f[2] in known_gen_counters:
+                            result["generator_state"] = f[3]
+                            result["battery_voltage"] = f[4] + f[5] / 256.0
 
                         # RelayBasicLatchingStatus2: 06 03 [counter] [status] ...
                         # Status byte bit 0 = on/off state
@@ -561,7 +577,7 @@ class OneControlClient:
                     frames = decode_frames(data)
                     for f in frames:
                         # Generator Genie: 05 03 87 [state] [volt_hi] [volt_lo] ...
-                        if len(f) >= 6 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x24:
+                        if len(f) >= 6 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x87:
                             voltage = f[4] + f[5] / 256.0
                             return voltage
 
@@ -677,7 +693,7 @@ class OneControlClient:
                     frames = decode_frames(data)
                     for f in frames:
                         # Generator Genie: 05 03 87 [state] ...
-                        if len(f) >= 4 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x24:
+                        if len(f) >= 4 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x87:
                             return f[3]
 
                 except asyncio.TimeoutError:
@@ -697,15 +713,15 @@ class OneControlClient:
                 except Exception:
                     pass
 
-    async def generator_on(self) -> bool:
+    async def generator_on(self, counter: int = GENERATOR_COUNTER) -> bool:
         """Turn on the generator."""
-        return await self._control_generator(on=True)
+        return await self._control_generator(on=True, counter=counter)
 
-    async def generator_off(self) -> bool:
+    async def generator_off(self, counter: int = GENERATOR_COUNTER) -> bool:
         """Turn off the generator."""
-        return await self._control_generator(on=False)
+        return await self._control_generator(on=False, counter=counter)
 
-    async def _control_generator(self, on: bool) -> bool:
+    async def _control_generator(self, on: bool, counter: int = GENERATOR_COUNTER) -> bool:
         """
         Control the generator (internal implementation).
         
@@ -745,17 +761,17 @@ class OneControlClient:
 
             # 2. Seed request - Protocol 0x81, device type 42 00 04
             await send(bytes([
-                0x02, GENERATOR_PROTOCOL, GENERATOR_CONN, GENERATOR_COUNTER,
+                0x02, GENERATOR_PROTOCOL, GENERATOR_CONN, counter,
                 0x42, 0x00, 0x04
             ]))
 
-            # 3. Wait for seed (comes on protocol 0x82)
+            # 3. Wait for seed (protocol flag varies: 0x80 or 0x82)
             seed = None
             for _ in range(10):
                 await asyncio.sleep(0.3)
                 frames = await recv()
                 for f in frames:
-                    # Look for 06 82 ... 42 00 04 [seed]
+                    # Look for 06 [80|82] ... 42 00 04 [seed]
                     if len(f) >= 11 and f[0] == 0x06 and f[1] in (0x80, 0x82) and f[4] == 0x42:
                         seed = int.from_bytes(f[7:11], 'big')
                         break
@@ -772,7 +788,7 @@ class OneControlClient:
 
             # 5. Key transmit - device type 43 00 04
             await send(bytes([
-                0x06, GENERATOR_PROTOCOL, GENERATOR_CONN, GENERATOR_COUNTER,
+                0x06, GENERATOR_PROTOCOL, GENERATOR_CONN, counter,
                 0x43, 0x00, 0x04
             ]) + key_bytes)
             await asyncio.sleep(0.2)
@@ -783,7 +799,7 @@ class OneControlClient:
             cmd = 0x02 if on else 0x01
             ctrl_conn = GENERATOR_CONN + 2
             await send(bytes([
-                0x01, GENERATOR_PROTOCOL, ctrl_conn, GENERATOR_COUNTER,
+                0x01, GENERATOR_PROTOCOL, ctrl_conn, counter,
                 0x00, cmd
             ]))
             await asyncio.sleep(0.3)
@@ -815,7 +831,8 @@ class OneControlClient:
         - lights: {counter_hex: {"name": str, "func_id": int}}
         - tanks: {counter_hex: {"name": str, "func_id": int}}
         - water_heaters: {counter_hex: {"name": str, "func_id": int}}
-        - has_generator: bool
+        - water_pumps: {counter_hex: {"name": str, "func_id": int}}
+        - generators: {counter_hex: {"name": str, "func_id": int}}
         
         This discovers actual devices present in the RV, not just
         all possible device types.
@@ -885,7 +902,7 @@ class OneControlClient:
         tanks: dict[str, dict] = {}
         water_heaters: dict[str, dict] = {}
         water_pumps: dict[str, dict] = {}
-        has_generator = False
+        generators: dict[str, dict] = {}
 
         try:
             reader, writer = await asyncio.wait_for(
@@ -949,26 +966,30 @@ class OneControlClient:
                                     }
                                     _LOGGER.debug("Discovered water pump: %s (counter=%s)", name, counter_hex)
                             elif func_id == GENERATOR_FUNC_ID:
-                                has_generator = True
-                                _LOGGER.debug("Discovered generator")
+                                if counter_hex not in generators:
+                                    generators[counter_hex] = {
+                                        "name": name,
+                                        "func_id": func_id,
+                                    }
+                                    _LOGGER.debug("Discovered generator: %s (counter=%s)", name, counter_hex)
 
                 except asyncio.TimeoutError:
                     continue
 
-            _LOGGER.info("Discovery complete: %d lights, %d tanks, %d water heaters, %d water pumps, generator=%s",
-                        len(lights), len(tanks), len(water_heaters), len(water_pumps), has_generator)
+            _LOGGER.info("Discovery complete: %d lights, %d tanks, %d water heaters, %d water pumps, %d generators",
+                        len(lights), len(tanks), len(water_heaters), len(water_pumps), len(generators))
             
             return {
                 "lights": lights,
                 "tanks": tanks,
                 "water_heaters": water_heaters,
                 "water_pumps": water_pumps,
-                "has_generator": has_generator,
+                "generators": generators,
             }
 
         except Exception as err:
             _LOGGER.error("Error during device discovery: %s", err)
-            return {"lights": {}, "tanks": {}, "water_heaters": {}, "water_pumps": {}, "has_generator": False}
+            return {"lights": {}, "tanks": {}, "water_heaters": {}, "water_pumps": {}, "generators": {}}
 
         finally:
             if writer:

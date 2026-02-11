@@ -14,7 +14,15 @@ from homeassistant.config_entries import ConfigEntry, SOURCE_INTEGRATION_DISCOVE
 from homeassistant.const import Platform, EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant, Event
 
-from .const import DOMAIN, CONF_HOST, CONF_PORT, DEFAULT_HOST, DEFAULT_PORT
+from .const import (
+    DOMAIN,
+    CONF_HOST,
+    CONF_PORT,
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    CONF_DISCOVERED_GENERATORS,
+    DEFAULT_GENERATOR_COUNTER,
+)
 from .coordinator import OneControlCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -88,6 +96,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Create the coordinator
     coordinator = OneControlCoordinator(hass, host, port)
+    
+    # Initialize generator counters from discovered generators config
+    # This enables dynamic generator control using discovered counters
+    discovered_generators = entry.data.get(CONF_DISCOVERED_GENERATORS, {})
+    if discovered_generators:
+        # Convert hex string keys to integers
+        generator_counters = [int(counter_hex, 16) for counter_hex in discovered_generators.keys()]
+        coordinator.init_generator_counters(generator_counters)
+        _LOGGER.debug("Initialized generator counters from config: %s", discovered_generators)
+    elif entry.data.get("has_generator", False):
+        # Backward compatibility: old config with just has_generator flag
+        # Use default counter
+        coordinator.init_generator_counters([DEFAULT_GENERATOR_COUNTER])
+        _LOGGER.debug("Using default generator counter for backward compatibility")
 
     # Fetch initial data
     await coordinator.async_config_entry_first_refresh()

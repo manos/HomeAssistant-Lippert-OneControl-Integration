@@ -217,6 +217,16 @@ These require physical observation during operation and are not suitable for rem
 
 Contributions are welcome! Please see the protocol documentation for technical details.
 
+### Versioning
+
+This project uses [semantic versioning](https://semver.org/). **Every push to `main` must bump the version** in `custom_components/lippert_onecontrol/manifest.json` so that HACS detects the update and offers it to users.
+
+- **Patch** (`0.2.0` → `0.2.1`): Bug fixes, minor improvements
+- **Minor** (`0.2.1` → `0.3.0`): New features, new device support
+- **Major** (`0.3.0` → `1.0.0`): Breaking changes
+
+After bumping the version and pushing, create a matching GitHub release (e.g., `v0.2.1`) so HACS can present it in the update UI.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.

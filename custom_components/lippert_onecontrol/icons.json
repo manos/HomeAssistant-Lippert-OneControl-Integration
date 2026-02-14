@@ -1,8 +1,5 @@
 {
   "entity": {
-    "light": {
-      "default": "mdi:lightbulb"
-    },
     "sensor": {
       "fresh_tank": {
         "default": "mdi:water"

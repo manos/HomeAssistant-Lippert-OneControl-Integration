@@ -115,7 +115,7 @@ class OneControlGeneratorSwitch(CoordinatorEntity[OneControlCoordinator], Switch
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on the generator."""
-        _LOGGER.info("Turning on generator")
+        _LOGGER.debug("Turning on generator")
         success = await self.coordinator.async_generator_on()
         if success:
             # Request coordinator refresh to get new state
@@ -125,7 +125,7 @@ class OneControlGeneratorSwitch(CoordinatorEntity[OneControlCoordinator], Switch
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the generator."""
-        _LOGGER.info("Turning off generator")
+        _LOGGER.debug("Turning off generator")
         success = await self.coordinator.async_generator_off()
         if success:
             # Request coordinator refresh to get new state
@@ -183,7 +183,7 @@ class OneControlWaterHeaterSwitch(CoordinatorEntity[OneControlCoordinator], Swit
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on the water heater."""
-        _LOGGER.info("Turning on water heater %02X (%s)", self._counter, self._attr_name)
+        _LOGGER.debug("Turning on water heater %02X (%s)", self._counter, self._attr_name)
         success = await self.coordinator.async_turn_water_heater_on(self._counter)
         if success:
             self.async_write_ha_state()
@@ -192,7 +192,7 @@ class OneControlWaterHeaterSwitch(CoordinatorEntity[OneControlCoordinator], Swit
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the water heater."""
-        _LOGGER.info("Turning off water heater %02X (%s)", self._counter, self._attr_name)
+        _LOGGER.debug("Turning off water heater %02X (%s)", self._counter, self._attr_name)
         success = await self.coordinator.async_turn_water_heater_off(self._counter)
         if success:
             self.async_write_ha_state()
@@ -244,7 +244,7 @@ class OneControlWaterPumpSwitch(CoordinatorEntity[OneControlCoordinator], Switch
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on the water pump."""
-        _LOGGER.info("Turning on water pump %02X (%s)", self._counter, self._attr_name)
+        _LOGGER.debug("Turning on water pump %02X (%s)", self._counter, self._attr_name)
         success = await self.coordinator.async_turn_water_pump_on(self._counter)
         if success:
             self.async_write_ha_state()
@@ -253,7 +253,7 @@ class OneControlWaterPumpSwitch(CoordinatorEntity[OneControlCoordinator], Switch
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the water pump."""
-        _LOGGER.info("Turning off water pump %02X (%s)", self._counter, self._attr_name)
+        _LOGGER.debug("Turning off water pump %02X (%s)", self._counter, self._attr_name)
         success = await self.coordinator.async_turn_water_pump_off(self._counter)
         if success:
             self.async_write_ha_state()

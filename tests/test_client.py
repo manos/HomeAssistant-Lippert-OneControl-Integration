@@ -103,34 +103,44 @@ class TestLightControl:
 
 
 class TestSensorReading:
-    """Tests for sensor reading methods."""
+    """Tests for read_all_sensors (the unified sensor reader)."""
+
+    # On connection failure, read_all_sensors returns the initial result dict
+    # with None/empty values rather than raising.
+    EMPTY_RESULT = {
+        "tanks": {},
+        "battery_voltage": None,
+        "generator_hours": None,
+        "generator_state": None,
+        "relay_states": {},
+    }
 
     @pytest.mark.asyncio
-    async def test_read_tank_levels_connection_failure(self):
-        """Test tank reading handles connection failure."""
+    async def test_read_all_sensors_connection_failure(self):
+        """Test read_all_sensors returns defaults on connection failure."""
         client = OneControlClient("192.168.1.1")
-        
+
         with patch("asyncio.open_connection", side_effect=ConnectionRefusedError):
-            result = await client.read_tank_levels()
-            assert result == {}
+            result = await client.read_all_sensors()
+            assert result == self.EMPTY_RESULT
 
     @pytest.mark.asyncio
-    async def test_read_battery_voltage_connection_failure(self):
-        """Test voltage reading handles connection failure."""
+    async def test_read_all_sensors_timeout(self):
+        """Test read_all_sensors returns defaults on timeout."""
         client = OneControlClient("192.168.1.1")
-        
-        with patch("asyncio.open_connection", side_effect=ConnectionRefusedError):
-            result = await client.read_battery_voltage()
-            assert result is None
+
+        with patch("asyncio.open_connection", side_effect=asyncio.TimeoutError):
+            result = await client.read_all_sensors()
+            assert result == self.EMPTY_RESULT
 
     @pytest.mark.asyncio
-    async def test_read_generator_hours_connection_failure(self):
-        """Test hours reading handles connection failure."""
+    async def test_read_all_sensors_accepts_generator_counters(self):
+        """Test read_all_sensors accepts optional generator_counters param."""
         client = OneControlClient("192.168.1.1")
-        
+
         with patch("asyncio.open_connection", side_effect=ConnectionRefusedError):
-            result = await client.read_generator_hours()
-            assert result is None
+            result = await client.read_all_sensors(generator_counters=[0x24, 0x43])
+            assert result == self.EMPTY_RESULT
 
 
 class TestTEAAuthentication:

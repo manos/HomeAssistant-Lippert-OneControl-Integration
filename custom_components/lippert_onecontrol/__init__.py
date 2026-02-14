@@ -1,7 +1,12 @@
 """Lippert OneControl integration for Home Assistant.
 
-Control RV lights, generator, read tank levels, battery voltage,
-generator state, and generator hours via the Lippert OneControl system.
+Controls and monitors RV devices via the Lippert OneControl system:
+- Lights (ON/OFF)
+- Generator (ON/OFF, state, hours, battery voltage)
+- Water heaters (gas & electric ON/OFF with broadcast state tracking)
+- Water pump (ON/OFF with broadcast state tracking)
+- Tank sensors (Fresh, Grey, Black, LP)
+- Leveler buttons (Auto Level, Retract, Cancel)
 """
 from __future__ import annotations
 
@@ -89,7 +94,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Lippert OneControl from a config entry."""
-    _LOGGER.info("Setting up Lippert OneControl integration")
+    _LOGGER.debug("Setting up Lippert OneControl integration")
 
     host = entry.data[CONF_HOST]
     port = entry.data.get(CONF_PORT, DEFAULT_PORT)
@@ -129,13 +134,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload config entry when options change (e.g., rediscovery adds new devices)."""
-    _LOGGER.info("Reloading Lippert OneControl after config update (new devices added)")
+    _LOGGER.debug("Reloading Lippert OneControl after config update (new devices added)")
     await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    _LOGGER.info("Unloading Lippert OneControl integration")
+    _LOGGER.debug("Unloading Lippert OneControl integration")
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 

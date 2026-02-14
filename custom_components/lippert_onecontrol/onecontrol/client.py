@@ -1,12 +1,15 @@
 """High-level OneControl client for Lippert RV systems.
 
 This client handles:
-- Light control (ON/OFF) with proper authentication
-- Tank level reading
-- Battery voltage reading  
-- Generator hour meter reading
+- Device discovery via 0x08 0x02 registration broadcasts
+- Light control (ON/OFF) with seed/key authentication
+- Water heater and water pump control (latching relay toggle)
+- Generator control (ON/OFF) with TEA cipher authentication
+- Leveler control (Auto Level, Retract, Cancel)
+- Sensor reading (tanks, battery voltage, generator state/hours)
 
-CRITICAL: Each control command requires a FRESH connection with authentication!
+Protocol: TCP on port 6969, COBS-encoded frames, CRC-8/MAXIM checksums.
+Each control command requires a FRESH connection with full authentication.
 """
 from __future__ import annotations
 
@@ -16,7 +19,8 @@ import struct
 import time
 from typing import Optional
 
-from .protocol import cobs_encode, crc8_maxim, decode_frames, tea_encrypt
+from .device_names import FUNCTION_NAMES
+from .protocol import cobs_encode, decode_frames, tea_encrypt
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -488,231 +492,6 @@ class OneControlClient:
                 except Exception:
                     pass
 
-    async def read_tank_levels(self, duration: float = 3.0) -> dict[int, int]:
-        """
-        Read tank levels from controller broadcasts.
-        
-        Returns dict mapping counter to level percentage (0-100).
-        """
-        reader: Optional[asyncio.StreamReader] = None
-        writer: Optional[asyncio.StreamWriter] = None
-
-        try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(self.host, self.port),
-                timeout=10.0
-            )
-
-            async def send(payload: bytes) -> None:
-                writer.write(cobs_encode(payload))
-                await writer.drain()
-
-            # Register
-            await send(bytes([0x01, 0x06, UNIVERSAL_SESSION, 0x00]))
-            await asyncio.sleep(0.1)
-            await send(bytes([0x08, 0x00, UNIVERSAL_SESSION, 0x00]) + DEFAULT_UUID)
-
-            # Collect 01 03 frames
-            levels: dict[int, int] = {}
-            start = time.monotonic()
-
-            while time.monotonic() - start < duration:
-                try:
-                    data = await asyncio.wait_for(reader.read(8192), timeout=0.5)
-                    frames = decode_frames(data)
-                    for f in frames:
-                        # 01 03 frames: 01 03 [counter] [level]
-                        if len(f) >= 4 and f[0] == 0x01 and f[1] == 0x03:
-                            counter = f[2]
-                            level = f[3]
-                            levels[counter] = level
-
-                except asyncio.TimeoutError:
-                    continue
-
-            return levels
-
-        except Exception as err:
-            _LOGGER.error("Error reading tank levels: %s", err)
-            return {}
-
-        finally:
-            if writer:
-                writer.close()
-                try:
-                    await writer.wait_closed()
-                except Exception:
-                    pass
-
-    async def read_battery_voltage(self, timeout: float = 3.0) -> Optional[float]:
-        """
-        Read battery voltage from Generator Genie broadcasts.
-        
-        Returns voltage as float, or None if not found.
-        """
-        reader: Optional[asyncio.StreamReader] = None
-        writer: Optional[asyncio.StreamWriter] = None
-
-        try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(self.host, self.port),
-                timeout=10.0
-            )
-
-            async def send(payload: bytes) -> None:
-                writer.write(cobs_encode(payload))
-                await writer.drain()
-
-            # Register
-            await send(bytes([0x01, 0x06, UNIVERSAL_SESSION, 0x00]))
-            await asyncio.sleep(0.1)
-            await send(bytes([0x08, 0x00, UNIVERSAL_SESSION, 0x00]) + DEFAULT_UUID)
-
-            # Look for 05 03 87 frame (Generator Genie status)
-            start = time.monotonic()
-
-            while time.monotonic() - start < timeout:
-                try:
-                    data = await asyncio.wait_for(reader.read(8192), timeout=0.5)
-                    frames = decode_frames(data)
-                    for f in frames:
-                        # Generator Genie: 05 03 87 [state] [volt_hi] [volt_lo] ...
-                        if len(f) >= 6 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x87:
-                            voltage = f[4] + f[5] / 256.0
-                            return voltage
-
-                except asyncio.TimeoutError:
-                    continue
-
-            return None
-
-        except Exception as err:
-            _LOGGER.error("Error reading battery voltage: %s", err)
-            return None
-
-        finally:
-            if writer:
-                writer.close()
-                try:
-                    await writer.wait_closed()
-                except Exception:
-                    pass
-
-    async def read_generator_hours(self, timeout: float = 3.0) -> Optional[float]:
-        """
-        Read generator operating hours from controller broadcasts.
-        
-        Returns hours as float, or None if not found.
-        """
-        reader: Optional[asyncio.StreamReader] = None
-        writer: Optional[asyncio.StreamWriter] = None
-
-        try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(self.host, self.port),
-                timeout=10.0
-            )
-
-            async def send(payload: bytes) -> None:
-                writer.write(cobs_encode(payload))
-                await writer.drain()
-
-            # Register
-            await send(bytes([0x01, 0x06, UNIVERSAL_SESSION, 0x00]))
-            await asyncio.sleep(0.1)
-            await send(bytes([0x08, 0x00, UNIVERSAL_SESSION, 0x00]) + DEFAULT_UUID)
-
-            # Look for 05 03 80 frame (Hour meter)
-            start = time.monotonic()
-
-            while time.monotonic() - start < timeout:
-                try:
-                    data = await asyncio.wait_for(reader.read(8192), timeout=0.5)
-                    frames = decode_frames(data)
-                    for f in frames:
-                        # Hour meter: 05 03 80 [uint32 BE seconds] [status]
-                        if len(f) >= 8 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x80:
-                            operating_seconds = int.from_bytes(f[3:7], 'big')
-                            hours = operating_seconds / 3600.0
-                            return hours
-
-                except asyncio.TimeoutError:
-                    continue
-
-            return None
-
-        except Exception as err:
-            _LOGGER.error("Error reading generator hours: %s", err)
-            return None
-
-        finally:
-            if writer:
-                writer.close()
-                try:
-                    await writer.wait_closed()
-                except Exception:
-                    pass
-
-    async def read_generator_state(self, timeout: float = 3.0) -> int | None:
-        """
-        Read generator state from Generator Genie broadcasts.
-        
-        Returns state as int:
-        - 0 = Off
-        - 1 = Priming
-        - 2 = Starting
-        - 3 = Running
-        - 4 = Stopping
-        
-        Or None if not found.
-        """
-        reader: Optional[asyncio.StreamReader] = None
-        writer: Optional[asyncio.StreamWriter] = None
-
-        try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(self.host, self.port),
-                timeout=10.0
-            )
-
-            async def send(payload: bytes) -> None:
-                writer.write(cobs_encode(payload))
-                await writer.drain()
-
-            # Register
-            await send(bytes([0x01, 0x06, UNIVERSAL_SESSION, 0x00]))
-            await asyncio.sleep(0.1)
-            await send(bytes([0x08, 0x00, UNIVERSAL_SESSION, 0x00]) + DEFAULT_UUID)
-
-            # Look for 05 03 87 frame (Generator Genie status)
-            start = time.monotonic()
-
-            while time.monotonic() - start < timeout:
-                try:
-                    data = await asyncio.wait_for(reader.read(8192), timeout=0.5)
-                    frames = decode_frames(data)
-                    for f in frames:
-                        # Generator Genie: 05 03 87 [state] ...
-                        if len(f) >= 4 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x87:
-                            return f[3]
-
-                except asyncio.TimeoutError:
-                    continue
-
-            return None
-
-        except Exception as err:
-            _LOGGER.error("Error reading generator state: %s", err)
-            return None
-
-        finally:
-            if writer:
-                writer.close()
-                try:
-                    await writer.wait_closed()
-                except Exception:
-                    pass
-
     async def generator_on(self, counter: int = GENERATOR_COUNTER) -> bool:
         """Turn on the generator."""
         return await self._control_generator(on=True, counter=counter)
@@ -837,49 +616,7 @@ class OneControlClient:
         This discovers actual devices present in the RV, not just
         all possible device types.
         """
-        # Known function IDs from decompiled app
-        # CRITICAL: Only include CONFIRMED lights - motors/heaters use same protocol!
-        FUNCTION_NAMES = {
-            # CONFIRMED LIGHTS (safe to toggle)
-            32: "Kitchen Ceiling Light",
-            33: "Kitchen Sconce Light",
-            41: "Living Room Ceiling Light",
-            48: "Porch Light",
-            49: "Awning Light",  # The actual LIGHT, not motor
-            50: "Outdoor Light",
-            57: "Bedroom Light",
-            58: "Living Room Light",
-            59: "Kitchen Light",
-            63: "Bed Ceiling Light",
-            122: "Scare Light",
-            # TANKS (read-only sensors)
-            67: "Fresh Tank",
-            68: "Grey Tank",
-            69: "Black Tank",
-            70: "LP Tank",
-            71: "Generator Fuel Tank",
-            176: "LP Tank",
-            # GENERATOR
-            95: "Generator",
-            # MOTORS/OTHER (NOT lights! Do NOT auto-add as lights!)
-            # 105 = Awning MOTOR (extend/retract) - NOT a light!
-            # 107 = Water Tank Heater (heating pad under fresh tank)
-            # 88 = Landing Gear / Leveler
-            # 89-90 = Stabilizers
-            # 96 = Vent Cover
-            # 97 = Main Slide
-            105: "Awning",  # Motor, not light
-            107: "Water Tank Heater",  # Heating pad - NOT a light!
-            88: "Landing Gear",
-            89: "Front Stabilizer",
-            90: "Rear Stabilizer",
-            96: "Vent Cover",
-            97: "Main Slide",
-            4: "Electric Water Heater",
-            3: "Gas Water Heater",
-            5: "Water Pump",
-        }
-        
+        # func_id classification sets — FUNCTION_NAMES imported from const.py
         # ONLY include func_ids we are 100% SURE are lights
         # Removed: 105 (awning motor), 107 (may control water heater)
         LIGHT_FUNC_IDS = {32, 33, 41, 48, 49, 50, 57, 58, 59, 63, 122}

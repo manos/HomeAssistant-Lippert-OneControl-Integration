@@ -5,7 +5,6 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed

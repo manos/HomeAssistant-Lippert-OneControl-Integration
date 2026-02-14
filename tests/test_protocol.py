@@ -90,7 +90,7 @@ class TestCOBSEncode:
         assert decoded[-1] == crc8_maxim(original)
 
 
-class TestCOBSDecodeingle:
+class TestCOBSDecoding:
     """Tests for COBS decoding."""
 
     def test_simple_decode(self):

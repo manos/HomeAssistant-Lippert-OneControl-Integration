@@ -53,6 +53,5 @@ jobs:
       - name: Install ruff
         run: pip install ruff
 
-      - name: Check formatting
+      - name: Lint
         run: ruff check custom_components/
-        continue-on-error: true

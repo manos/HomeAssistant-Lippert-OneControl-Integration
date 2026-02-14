@@ -57,7 +57,7 @@ class OneControlAutoLevelButton(CoordinatorEntity[OneControlCoordinator], Button
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        _LOGGER.info("Auto Level button pressed")
+        _LOGGER.debug("Auto Level button pressed")
         success = await self.coordinator.async_leveler_auto_level()
         if not success:
             _LOGGER.error("Auto Level failed")
@@ -88,7 +88,7 @@ class OneControlRetractButton(CoordinatorEntity[OneControlCoordinator], ButtonEn
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        _LOGGER.info("Retract button pressed")
+        _LOGGER.debug("Retract button pressed")
         success = await self.coordinator.async_leveler_retract()
         if not success:
             _LOGGER.error("Retract failed")
@@ -119,7 +119,7 @@ class OneControlLevelerCancelButton(CoordinatorEntity[OneControlCoordinator], Bu
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        _LOGGER.info("Cancel button pressed")
+        _LOGGER.debug("Cancel button pressed")
         success = await self.coordinator.async_leveler_cancel()
         if not success:
             _LOGGER.error("Cancel failed")

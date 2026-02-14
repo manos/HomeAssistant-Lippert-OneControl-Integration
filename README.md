@@ -34,6 +34,10 @@ Control your RV's Lippert OneControl system directly from Home Assistant!
   - ON/OFF control
   - Real-time state sync from broadcasts
 
+- **🏗️ Leveler Control**: Auto Level, Retract, and Cancel buttons
+  - Requires ACC power and parking brake engaged
+  - One-shot button entities (not toggle switches)
+
 - **🔄 Auto-Discovery**: Automatically finds devices installed in your RV
   - No manual configuration of device IDs needed
   - Device selection UI during setup - choose which devices to add
@@ -179,12 +183,13 @@ For technical details, see the [OneControl-RV-C-Protocol](https://github.com/man
 
 ⚠️ **Use at your own risk.** This integration controls electrical systems in your RV.
 
-The following device types are intentionally **NOT** exposed:
-- **Slides** - Collision/pinch risk, requires visual confirmation
-- **Awning motor** - Collision risk, requires visual confirmation  
-- **Levelers/landing gear** - Vehicle stability risk
+**Leveler controls** (Auto Level, Retract, Cancel) are exposed as button entities. These trigger one-shot actions identical to pressing buttons on the physical panel or app. **Ensure the area around and under the RV is clear before activating leveling commands.** The leveling system has its own built-in safety logic (e.g., parking brake and ACC requirements).
 
-These require physical observation during operation and are not suitable for remote control.
+The following device types are intentionally **NOT** exposed:
+- **Slides** - Collision/pinch risk, requires continuous visual confirmation
+- **Awning motor** - Collision risk, requires continuous visual confirmation
+
+These require physical observation during the entire operation and are not suitable for remote control.
 
 ## Troubleshooting
 

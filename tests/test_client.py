@@ -113,6 +113,7 @@ class TestSensorReading:
         "generator_hours": None,
         "generator_state": None,
         "relay_states": {},
+        "device_map": {},
     }
 
     @pytest.mark.asyncio
@@ -134,13 +135,14 @@ class TestSensorReading:
             assert result == self.EMPTY_RESULT
 
     @pytest.mark.asyncio
-    async def test_read_all_sensors_accepts_generator_counters(self):
-        """Test read_all_sensors accepts optional generator_counters param."""
+    async def test_read_all_sensors_has_device_map_key(self):
+        """Test read_all_sensors result always includes device_map."""
         client = OneControlClient("192.168.1.1")
 
         with patch("asyncio.open_connection", side_effect=ConnectionRefusedError):
-            result = await client.read_all_sensors(generator_counters=[0x24, 0x43])
-            assert result == self.EMPTY_RESULT
+            result = await client.read_all_sensors()
+            assert "device_map" in result
+            assert isinstance(result["device_map"], dict)
 
 
 class TestTEAAuthentication:

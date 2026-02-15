@@ -30,30 +30,25 @@ async def async_setup_entry(
 
     entities: list[SensorEntity] = []
 
-    # Tank sensors from discovered devices
+    # Tank sensors -- config keyed by func_id string: {"67": {"name": "Fresh Tank"}}
     discovered_tanks = entry.data.get(CONF_DISCOVERED_TANKS, {})
-    for counter_str, info in discovered_tanks.items():
-        counter = int(counter_str, 16) if isinstance(counter_str, str) else counter_str
+    for fid_str, info in discovered_tanks.items():
+        func_id = int(fid_str)
         entities.append(
             OneControlTankSensor(
                 coordinator=coordinator,
-                counter=counter,
+                func_id=func_id,
                 name=info["name"],
-                func_id=info.get("func_id"),
             )
         )
 
     # Generator sensors - only if generators were discovered
-    # Note: Battery voltage also comes from generator status frames,
-    # so we add it alongside generator sensors
     discovered_generators = entry.data.get(CONF_DISCOVERED_GENERATORS, {})
-    has_generator_legacy = entry.data.get("has_generator", False)  # Backward compat
-    if discovered_generators or has_generator_legacy:
+    if discovered_generators:
         entities.append(OneControlBatteryVoltageSensor(coordinator))
         entities.append(OneControlGeneratorHoursSensor(coordinator))
         entities.append(OneControlGeneratorStateSensor(coordinator))
-        _LOGGER.debug("Adding generator sensors (discovered: %s, legacy: %s)", 
-                     bool(discovered_generators), has_generator_legacy)
+        _LOGGER.debug("Adding generator sensors")
 
     async_add_entities(entities)
 
@@ -63,30 +58,24 @@ class OneControlTankSensor(CoordinatorEntity[OneControlCoordinator], SensorEntit
 
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_has_entity_name = False  # Use full name directly
-    _attr_suggested_display_precision = 0  # Show as whole percentage
+    _attr_has_entity_name = False
+    _attr_suggested_display_precision = 0
 
     def __init__(
         self,
         coordinator: OneControlCoordinator,
-        counter: int,
+        func_id: int,
         name: str,
-        func_id: int | None = None,
     ) -> None:
         """Initialize the tank sensor."""
         super().__init__(coordinator)
-        self._counter = counter
         self._func_id = func_id
 
-        # Use the tank name directly (e.g., "Fresh Tank")
         self._attr_name = name
+        self._attr_unique_id = f"lippert_onecontrol_tank_fid{func_id}"
 
-        # Unique ID based on counter
-        self._attr_unique_id = f"lippert_onecontrol_tank_{counter:02x}"
-
-        # Each tank gets its own device
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, f"tank_{counter:02x}")},
+            "identifiers": {(DOMAIN, f"tank_fid{func_id}")},
             "name": name,
             "manufacturer": "Lippert",
             "model": "OneControl Tank Sensor",
@@ -109,7 +98,7 @@ class OneControlTankSensor(CoordinatorEntity[OneControlCoordinator], SensorEntit
         """Return the tank level percentage."""
         if self.coordinator.data is None:
             return None
-        return self.coordinator.data.tanks.get(self._counter)
+        return self.coordinator.data.tanks.get(self._func_id)
 
     @property
     def available(self) -> bool:
@@ -123,10 +112,10 @@ class OneControlBatteryVoltageSensor(CoordinatorEntity[OneControlCoordinator], S
     _attr_device_class = SensorDeviceClass.VOLTAGE
     _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_has_entity_name = True  # Append to device name
+    _attr_has_entity_name = True
     _attr_name = "Battery Voltage"
     _attr_icon = "mdi:car-battery"
-    _attr_suggested_display_precision = 1  # Show as 12.8V
+    _attr_suggested_display_precision = 1
 
     def __init__(self, coordinator: OneControlCoordinator) -> None:
         """Initialize the battery voltage sensor."""
@@ -134,7 +123,6 @@ class OneControlBatteryVoltageSensor(CoordinatorEntity[OneControlCoordinator], S
 
         self._attr_unique_id = "lippert_onecontrol_battery_voltage"
 
-        # This stays under the main controller device
         self._attr_device_info = {
             "identifiers": {(DOMAIN, "onecontrol_controller")},
             "name": "OneControl",
@@ -162,10 +150,10 @@ class OneControlGeneratorHoursSensor(CoordinatorEntity[OneControlCoordinator], S
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_native_unit_of_measurement = UnitOfTime.HOURS
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_has_entity_name = True  # Append to device name
+    _attr_has_entity_name = True
     _attr_name = "Hours"
     _attr_icon = "mdi:counter"
-    _attr_suggested_display_precision = 1  # Show as 168.3 hours
+    _attr_suggested_display_precision = 1
 
     def __init__(self, coordinator: OneControlCoordinator) -> None:
         """Initialize the generator hours sensor."""
@@ -173,7 +161,6 @@ class OneControlGeneratorHoursSensor(CoordinatorEntity[OneControlCoordinator], S
 
         self._attr_unique_id = "lippert_onecontrol_generator_hours"
 
-        # Generator gets its own device
         self._attr_device_info = {
             "identifiers": {(DOMAIN, "generator")},
             "name": "Generator",
@@ -200,7 +187,7 @@ class OneControlGeneratorStateSensor(CoordinatorEntity[OneControlCoordinator], S
     """Representation of Lippert OneControl generator state sensor."""
 
     _attr_device_class = SensorDeviceClass.ENUM
-    _attr_has_entity_name = True  # Append to device name
+    _attr_has_entity_name = True
     _attr_name = "State"
     _attr_icon = "mdi:engine"
     _attr_options = ["Off", "Priming", "Starting", "Running", "Stopping", "Unknown"]
@@ -211,7 +198,6 @@ class OneControlGeneratorStateSensor(CoordinatorEntity[OneControlCoordinator], S
 
         self._attr_unique_id = "lippert_onecontrol_generator_state"
 
-        # Generator gets its own device (same as hours sensor)
         self._attr_device_info = {
             "identifiers": {(DOMAIN, "generator")},
             "name": "Generator",

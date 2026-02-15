@@ -1,35 +1,48 @@
-"""Data coordinator for Lippert OneControl."""
+"""Data coordinator for Lippert OneControl.
+
+Maintains a live func_id <-> counter mapping that refreshes every poll cycle.
+All device state and control is keyed by func_id (stable) with counters
+resolved at runtime from 0x08 0x02 registration broadcasts.
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, SCAN_INTERVAL, DEFAULT_GENERATOR_COUNTER
+from .const import DOMAIN, SCAN_INTERVAL
 from .onecontrol import OneControlClient
 
 _LOGGER = logging.getLogger(__name__)
 
+# Generator func_id (from decompiled app)
+GENERATOR_FUNC_ID = 95
+
 
 @dataclass
 class OneControlData:
-    """Data class for OneControl state."""
+    """Data class for OneControl state.  All keyed by func_id (stable)."""
 
-    lights: dict[int, bool]  # counter -> on/off state
-    tanks: dict[int, int]  # counter -> level percentage
-    water_heaters: dict[int, bool]  # counter -> on/off state
-    water_pumps: dict[int, bool]  # counter -> on/off state
-    battery_voltage: float | None
-    generator_hours: float | None
-    generator_state: int | None  # 0=Off, 1=Priming, 2=Starting, 3=Running, 4=Stopping
+    lights: dict[int, bool] = field(default_factory=dict)       # func_id -> on/off
+    tanks: dict[int, int] = field(default_factory=dict)         # func_id -> level %
+    water_heaters: dict[int, bool] = field(default_factory=dict) # func_id -> on/off
+    water_pumps: dict[int, bool] = field(default_factory=dict)   # func_id -> on/off
+    battery_voltage: float | None = None
+    generator_hours: float | None = None
+    generator_state: int | None = None  # 0=Off, 1=Priming, 2=Starting, 3=Running, 4=Stopping
 
 
 class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
-    """Coordinator for Lippert OneControl."""
+    """Coordinator for Lippert OneControl.
+
+    Core concept: func_id is the STABLE device identifier (from firmware).
+    Counter is VOLATILE (can change on reboot).  Every poll cycle refreshes
+    the func_id -> counter map from live 0x08 0x02 registration broadcasts.
+    """
 
     def __init__(self, hass: HomeAssistant, host: str, port: int) -> None:
         """Initialize the coordinator."""
@@ -42,98 +55,99 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
         self.host = host
         self.port = port
         self._client = OneControlClient(host, port)
-        # Initialize light states - will be populated by init_light_states()
+
+        # Live mapping refreshed every poll cycle from 0x08 0x02 broadcasts
+        self._func_id_to_counter: dict[int, int] = {}
+        self._counter_to_func_id: dict[int, int] = {}
+
+        # Device states keyed by func_id (stable)
+        self._light_func_ids: set[int] = set()
         self._light_states: dict[int, bool] = {}
-        # Initialize water heater states - will be populated by init_water_heater_states()
+        self._water_heater_func_ids: set[int] = set()
         self._water_heater_states: dict[int, bool] = {}
-        # Initialize water pump states - will be populated by init_water_pump_states()
+        self._water_pump_func_ids: set[int] = set()
         self._water_pump_states: dict[int, bool] = {}
-        # Generator counters - will be populated by init_generator_counters()
-        self._generator_counters: list[int] = []
+        self._has_generator: bool = False
 
-    def init_light_states(self, counters: list[int]) -> None:
-        """Register light counters for state tracking.
-        
-        Initial state is False (off) until first broadcast is received.
-        Actual state is updated from RelayBasicLatchingStatus2 broadcasts during polling.
-        """
-        for counter in counters:
-            if counter not in self._light_states:
-                self._light_states[counter] = False
+    # ---- Initialization (called from platform setup) ----
 
-    def init_water_heater_states(self, counters: list[int]) -> None:
-        """Register water heater counters for state tracking.
-        
-        Initial state is False (off) until first broadcast is received.
-        Actual state is updated from RelayBasicLatchingStatus2 broadcasts during polling.
-        """
-        for counter in counters:
-            if counter not in self._water_heater_states:
-                self._water_heater_states[counter] = False
+    def init_light_states(self, func_ids: list[int]) -> None:
+        """Register light func_ids for state tracking."""
+        for fid in func_ids:
+            self._light_func_ids.add(fid)
+            if fid not in self._light_states:
+                self._light_states[fid] = False
 
-    def init_water_pump_states(self, counters: list[int]) -> None:
-        """Register water pump counters for state tracking.
-        
-        Initial state is False (off) until first broadcast is received.
-        Actual state is updated from RelayBasicLatchingStatus2 broadcasts during polling.
-        """
-        for counter in counters:
-            if counter not in self._water_pump_states:
-                self._water_pump_states[counter] = False
+    def init_water_heater_states(self, func_ids: list[int]) -> None:
+        """Register water heater func_ids for state tracking."""
+        for fid in func_ids:
+            self._water_heater_func_ids.add(fid)
+            if fid not in self._water_heater_states:
+                self._water_heater_states[fid] = False
 
-    def init_generator_counters(self, counters: list[int]) -> None:
-        """Register generator counters discovered from 08 02 broadcasts.
-        
-        These counters are used for control commands.
-        For status reading, we use a flexible hybrid approach that accepts
-        generator status from any known counter.
-        """
-        self._generator_counters = counters
-        _LOGGER.debug("Initialized generator counters: %s", [f"0x{c:02x}" for c in counters])
+    def init_water_pump_states(self, func_ids: list[int]) -> None:
+        """Register water pump func_ids for state tracking."""
+        for fid in func_ids:
+            self._water_pump_func_ids.add(fid)
+            if fid not in self._water_pump_states:
+                self._water_pump_states[fid] = False
+
+    def init_generator(self) -> None:
+        """Register that a generator is present."""
+        self._has_generator = True
+
+    # ---- Counter resolution ----
+
+    def get_counter(self, func_id: int) -> int | None:
+        """Resolve a func_id to its current counter from the live map."""
+        return self._func_id_to_counter.get(func_id)
+
+    # ---- Poll cycle ----
 
     async def _async_update_data(self) -> OneControlData:
         """Fetch data from OneControl.
-        
-        Uses a single connection to read ALL sensor data efficiently.
-        Previous approach opened 4 separate connections (12+ seconds).
-        Now takes ~3 seconds total.
+
+        Single connection reads all sensor data AND registration broadcasts
+        to refresh the func_id <-> counter map every cycle (~3s).
         """
         try:
-            # Read ALL sensors in ONE connection (much faster!)
-            # Pass discovered generator counters to help identify status frames
-            sensor_data = await self._client.read_all_sensors(
-                duration=3.0,
-                generator_counters=self._generator_counters if self._generator_counters else None
-            )
+            sensor_data = await self._client.read_all_sensors(duration=3.0)
 
-            # Update device states from RelayBasicLatchingStatus2 (0x06 0x03) broadcasts
-            # Both lights and water heaters use latching relays that broadcast their state
-            relay_states = sensor_data.get("relay_states", {})
-            
-            # Update light states from broadcasts
-            for counter in self._light_states:
-                if counter in relay_states:
-                    self._light_states[counter] = relay_states[counter]
-            
-            # Update water heater states from broadcasts
-            for counter in self._water_heater_states:
-                if counter in relay_states:
-                    self._water_heater_states[counter] = relay_states[counter]
-            
-            # Update water pump states from broadcasts
-            for counter in self._water_pump_states:
-                if counter in relay_states:
-                    self._water_pump_states[counter] = relay_states[counter]
-            
-            lights = self._light_states.copy()
-            water_heaters = self._water_heater_states.copy()
-            water_pumps = self._water_pump_states.copy()
+            # Update live device map from registration broadcasts
+            device_map: dict[int, int] = sensor_data.get("device_map", {})
+            if device_map:
+                self._func_id_to_counter = dict(device_map)
+                self._counter_to_func_id = {v: k for k, v in device_map.items()}
+                _LOGGER.debug(
+                    "Live device map updated: %d devices",
+                    len(self._func_id_to_counter),
+                )
+
+            # Update relay-based device states using reverse map
+            relay_states: dict[int, bool] = sensor_data.get("relay_states", {})
+            for counter, is_on in relay_states.items():
+                func_id = self._counter_to_func_id.get(counter)
+                if func_id is None:
+                    continue
+                if func_id in self._light_func_ids:
+                    self._light_states[func_id] = is_on
+                elif func_id in self._water_heater_func_ids:
+                    self._water_heater_states[func_id] = is_on
+                elif func_id in self._water_pump_func_ids:
+                    self._water_pump_states[func_id] = is_on
+
+            # Map tank data from counter-keyed to func_id-keyed
+            tanks_by_func_id: dict[int, int] = {}
+            for counter, level in sensor_data.get("tanks", {}).items():
+                func_id = self._counter_to_func_id.get(counter)
+                if func_id is not None:
+                    tanks_by_func_id[func_id] = level
 
             return OneControlData(
-                lights=lights,
-                tanks=sensor_data.get("tanks", {}),
-                water_heaters=water_heaters,
-                water_pumps=water_pumps,
+                lights=self._light_states.copy(),
+                tanks=tanks_by_func_id,
+                water_heaters=self._water_heater_states.copy(),
+                water_pumps=self._water_pump_states.copy(),
                 battery_voltage=sensor_data.get("battery_voltage"),
                 generator_hours=sensor_data.get("generator_hours"),
                 generator_state=sensor_data.get("generator_state"),
@@ -144,81 +158,67 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
         except Exception as err:
             raise UpdateFailed(f"Error communicating with OneControl: {err}") from err
 
-    async def async_turn_light_on(self, counter: int) -> bool:
-        """Turn on a light."""
+    # ---- Light control (by func_id) ----
+
+    async def async_turn_light_on(self, func_id: int) -> bool:
+        """Turn on a light, resolving counter at call time."""
+        counter = self.get_counter(func_id)
+        if counter is None:
+            _LOGGER.error("No counter mapped for light func_id %d", func_id)
+            return False
         try:
             result = await self._client.light_on(counter)
             if result:
-                self._light_states[counter] = True
+                self._light_states[func_id] = True
             return result
         except Exception as err:
-            _LOGGER.error("Failed to turn on light %02X: %s", counter, err)
+            _LOGGER.error("Failed to turn on light func_id %d: %s", func_id, err)
             return False
 
-    async def async_turn_light_off(self, counter: int) -> bool:
-        """Turn off a light."""
+    async def async_turn_light_off(self, func_id: int) -> bool:
+        """Turn off a light, resolving counter at call time."""
+        counter = self.get_counter(func_id)
+        if counter is None:
+            _LOGGER.error("No counter mapped for light func_id %d", func_id)
+            return False
         try:
             result = await self._client.light_off(counter)
             if result:
-                self._light_states[counter] = False
+                self._light_states[func_id] = False
             return result
         except Exception as err:
-            _LOGGER.error("Failed to turn off light %02X: %s", counter, err)
+            _LOGGER.error("Failed to turn off light func_id %d: %s", func_id, err)
             return False
 
-    def get_light_state(self, counter: int) -> bool | None:
+    def get_light_state(self, func_id: int) -> bool | None:
         """Get the tracked state of a light."""
-        return self._light_states.get(counter)
+        return self._light_states.get(func_id)
+
+    # ---- Generator control ----
 
     async def async_generator_on(self) -> bool:
-        """Turn on the generator.
-        
-        Tries discovered counters first, then falls back to default.
-        The control counter may differ from the discovery counter, so we
-        try ALL known counters until one succeeds.
-        """
-        counters_to_try = list(self._generator_counters) if self._generator_counters else []
-        # Always include the default as a fallback
-        if DEFAULT_GENERATOR_COUNTER not in counters_to_try:
-            counters_to_try.append(DEFAULT_GENERATOR_COUNTER)
-        
-        for counter in counters_to_try:
-            try:
-                _LOGGER.debug("Trying generator ON with counter 0x%02x", counter)
-                result = await self._client.generator_on(counter)
-                if result:
-                    return True
-            except Exception as err:
-                _LOGGER.debug("Generator ON failed with counter 0x%02x: %s", counter, err)
-        
-        _LOGGER.error("Failed to turn on generator (tried counters: %s)", 
-                      [f"0x{c:02x}" for c in counters_to_try])
-        return False
+        """Turn on the generator, resolving counter at call time."""
+        counter = self.get_counter(GENERATOR_FUNC_ID)
+        if counter is None:
+            _LOGGER.error("No counter mapped for generator (func_id %d)", GENERATOR_FUNC_ID)
+            return False
+        try:
+            return await self._client.generator_on(counter)
+        except Exception as err:
+            _LOGGER.error("Failed to turn on generator: %s", err)
+            return False
 
     async def async_generator_off(self) -> bool:
-        """Turn off the generator.
-        
-        Tries discovered counters first, then falls back to default.
-        The control counter may differ from the discovery counter, so we
-        try ALL known counters until one succeeds.
-        """
-        counters_to_try = list(self._generator_counters) if self._generator_counters else []
-        # Always include the default as a fallback
-        if DEFAULT_GENERATOR_COUNTER not in counters_to_try:
-            counters_to_try.append(DEFAULT_GENERATOR_COUNTER)
-        
-        for counter in counters_to_try:
-            try:
-                _LOGGER.debug("Trying generator OFF with counter 0x%02x", counter)
-                result = await self._client.generator_off(counter)
-                if result:
-                    return True
-            except Exception as err:
-                _LOGGER.debug("Generator OFF failed with counter 0x%02x: %s", counter, err)
-        
-        _LOGGER.error("Failed to turn off generator (tried counters: %s)", 
-                      [f"0x{c:02x}" for c in counters_to_try])
-        return False
+        """Turn off the generator, resolving counter at call time."""
+        counter = self.get_counter(GENERATOR_FUNC_ID)
+        if counter is None:
+            _LOGGER.error("No counter mapped for generator (func_id %d)", GENERATOR_FUNC_ID)
+            return False
+        try:
+            return await self._client.generator_off(counter)
+        except Exception as err:
+            _LOGGER.error("Failed to turn off generator: %s", err)
+            return False
 
     def get_generator_state(self) -> int | None:
         """Get the current generator state."""
@@ -226,59 +226,79 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
             return None
         return self.data.generator_state
 
-    async def async_turn_water_heater_on(self, counter: int) -> bool:
-        """Turn on a water heater."""
+    # ---- Water heater control (by func_id) ----
+
+    async def async_turn_water_heater_on(self, func_id: int) -> bool:
+        """Turn on a water heater, resolving counter at call time."""
+        counter = self.get_counter(func_id)
+        if counter is None:
+            _LOGGER.error("No counter mapped for water heater func_id %d", func_id)
+            return False
         try:
             result = await self._client.water_heater_on(counter)
             if result:
-                self._water_heater_states[counter] = True
+                self._water_heater_states[func_id] = True
             return result
         except Exception as err:
-            _LOGGER.error("Failed to turn on water heater %02X: %s", counter, err)
+            _LOGGER.error("Failed to turn on water heater func_id %d: %s", func_id, err)
             return False
 
-    async def async_turn_water_heater_off(self, counter: int) -> bool:
-        """Turn off a water heater."""
+    async def async_turn_water_heater_off(self, func_id: int) -> bool:
+        """Turn off a water heater, resolving counter at call time."""
+        counter = self.get_counter(func_id)
+        if counter is None:
+            _LOGGER.error("No counter mapped for water heater func_id %d", func_id)
+            return False
         try:
             result = await self._client.water_heater_off(counter)
             if result:
-                self._water_heater_states[counter] = False
+                self._water_heater_states[func_id] = False
             return result
         except Exception as err:
-            _LOGGER.error("Failed to turn off water heater %02X: %s", counter, err)
+            _LOGGER.error("Failed to turn off water heater func_id %d: %s", func_id, err)
             return False
 
-    def get_water_heater_state(self, counter: int) -> bool | None:
+    def get_water_heater_state(self, func_id: int) -> bool | None:
         """Get the tracked state of a water heater."""
-        return self._water_heater_states.get(counter)
+        return self._water_heater_states.get(func_id)
 
-    async def async_turn_water_pump_on(self, counter: int) -> bool:
-        """Turn on a water pump."""
+    # ---- Water pump control (by func_id) ----
+
+    async def async_turn_water_pump_on(self, func_id: int) -> bool:
+        """Turn on a water pump, resolving counter at call time."""
+        counter = self.get_counter(func_id)
+        if counter is None:
+            _LOGGER.error("No counter mapped for water pump func_id %d", func_id)
+            return False
         try:
             result = await self._client.water_pump_on(counter)
             if result:
-                self._water_pump_states[counter] = True
+                self._water_pump_states[func_id] = True
             return result
         except Exception as err:
-            _LOGGER.error("Failed to turn on water pump %02X: %s", counter, err)
+            _LOGGER.error("Failed to turn on water pump func_id %d: %s", func_id, err)
             return False
 
-    async def async_turn_water_pump_off(self, counter: int) -> bool:
-        """Turn off a water pump."""
+    async def async_turn_water_pump_off(self, func_id: int) -> bool:
+        """Turn off a water pump, resolving counter at call time."""
+        counter = self.get_counter(func_id)
+        if counter is None:
+            _LOGGER.error("No counter mapped for water pump func_id %d", func_id)
+            return False
         try:
             result = await self._client.water_pump_off(counter)
             if result:
-                self._water_pump_states[counter] = False
+                self._water_pump_states[func_id] = False
             return result
         except Exception as err:
-            _LOGGER.error("Failed to turn off water pump %02X: %s", counter, err)
+            _LOGGER.error("Failed to turn off water pump func_id %d: %s", func_id, err)
             return False
 
-    def get_water_pump_state(self, counter: int) -> bool | None:
+    def get_water_pump_state(self, func_id: int) -> bool | None:
         """Get the tracked state of a water pump."""
-        return self._water_pump_states.get(counter)
+        return self._water_pump_states.get(func_id)
 
-    # ========== LEVELER CONTROL ==========
+    # ---- Leveler control (no counter needed - uses fixed leveler_id) ----
 
     async def async_leveler_auto_level(self) -> bool:
         """Start auto-leveling sequence."""

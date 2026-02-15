@@ -167,7 +167,7 @@ The integration automatically discovers devices based on their function ID. Comm
 |-------------|-------------|
 | 95 | Generator |
 
-> **Note:** Device counters (internal IDs) vary per RV installation. The integration uses function IDs to identify device types, then auto-discovers the specific counters for your RV.
+> **Note:** Devices are identified by their firmware function ID (stable across reboots). Internal bus counters (volatile addresses) are resolved dynamically at runtime from live registration broadcasts. This means the integration automatically adapts when the OneControl controller reassigns counters after a reboot or power cycle -- no reconfiguration needed.
 
 ## Protocol Details
 
@@ -203,6 +203,7 @@ These require physical observation during the entire operation and are not suita
 - The integration uses automatic retry (2 attempts) for commands
 - If commands fail, try again after a few seconds
 - The OneControl app should be closed (it may hold the connection)
+- If a device consistently fails after a controller reboot, check logs for "No counter mapped" -- the live device map refreshes every 7 seconds and should self-heal
 
 ### State Shows Incorrect Value
 - Device states sync from broadcasts every ~7 seconds

@@ -46,10 +46,6 @@ def get_suggested_area(name: str) -> str | None:
     return None
 
 
-# Generator counter - DEPRECATED: now discovered dynamically
-# Kept as fallback for backward compatibility with existing config entries
-DEFAULT_GENERATOR_COUNTER: Final = 0x24
-
 # Config flow keys
 CONF_HOST: Final = "host"
 CONF_PORT: Final = "port"

@@ -45,26 +45,24 @@ async def async_setup_entry(
     """Set up Lippert OneControl lights."""
     coordinator: OneControlCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    # Get discovered lights from config entry data
+    # Config is now keyed by func_id string: {"57": {"name": "Bedroom Light"}}
     discovered_lights = entry.data.get(CONF_DISCOVERED_LIGHTS, {})
     
-    # Initialize light states to prevent "Unknown" state
-    counters = []
+    func_ids = []
     entities = []
-    for counter_str, info in discovered_lights.items():
-        counter = int(counter_str, 16) if isinstance(counter_str, str) else counter_str
-        counters.append(counter)
+    for fid_str, info in discovered_lights.items():
+        func_id = int(fid_str)
+        func_ids.append(func_id)
         entities.append(
             OneControlLight(
                 coordinator=coordinator,
-                counter=counter,
+                func_id=func_id,
                 name=info["name"],
-                func_id=info.get("func_id"),
             )
         )
 
     # Initialize all light states to False (off) - prevents "Unknown" state
-    coordinator.init_light_states(counters)
+    coordinator.init_light_states(func_ids)
 
     async_add_entities(entities)
 
@@ -74,33 +72,27 @@ class OneControlLight(CoordinatorEntity[OneControlCoordinator], LightEntity):
 
     _attr_color_mode = ColorMode.ONOFF
     _attr_supported_color_modes = {ColorMode.ONOFF}
-    # Don't use entity name - we want full control over the name
     _attr_has_entity_name = False
 
     def __init__(
         self,
         coordinator: OneControlCoordinator,
-        counter: int,
+        func_id: int,
         name: str,
-        func_id: int | None = None,
     ) -> None:
         """Initialize the light."""
         super().__init__(coordinator)
-        self._counter = counter
         self._func_id = func_id
         
-        # Use just the device name (e.g., "Kitchen Ceiling Light")
         self._attr_name = name
-        
-        # Set icon based on light type
         self._attr_icon = get_light_icon(name)
         
-        # Unique ID based on counter
-        self._attr_unique_id = f"lippert_onecontrol_light_{counter:02x}"
+        # Unique ID based on func_id (stable across reboots)
+        self._attr_unique_id = f"lippert_onecontrol_light_fid{func_id}"
         
-        # Each light gets its own device for better organization
+        # Each light gets its own device
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, f"light_{counter:02x}")},
+            "identifiers": {(DOMAIN, f"light_fid{func_id}")},
             "name": name,
             "manufacturer": "Lippert",
             "model": "OneControl Light",
@@ -111,7 +103,7 @@ class OneControlLight(CoordinatorEntity[OneControlCoordinator], LightEntity):
     @property
     def is_on(self) -> bool | None:
         """Return true if light is on."""
-        return self.coordinator.get_light_state(self._counter)
+        return self.coordinator.get_light_state(self._func_id)
 
     @property
     def available(self) -> bool:
@@ -120,8 +112,8 @@ class OneControlLight(CoordinatorEntity[OneControlCoordinator], LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
-        _LOGGER.debug("Turning on %s (counter=%02X)", self._attr_name, self._counter)
-        success = await self.coordinator.async_turn_light_on(self._counter)
+        _LOGGER.debug("Turning on %s (func_id=%d)", self._attr_name, self._func_id)
+        success = await self.coordinator.async_turn_light_on(self._func_id)
         if success:
             self.async_write_ha_state()
         else:
@@ -129,8 +121,8 @@ class OneControlLight(CoordinatorEntity[OneControlCoordinator], LightEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
-        _LOGGER.debug("Turning off %s (counter=%02X)", self._attr_name, self._counter)
-        success = await self.coordinator.async_turn_light_off(self._counter)
+        _LOGGER.debug("Turning off %s (func_id=%d)", self._attr_name, self._func_id)
+        success = await self.coordinator.async_turn_light_off(self._func_id)
         if success:
             self.async_write_ha_state()
         else:

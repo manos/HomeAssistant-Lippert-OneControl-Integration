@@ -7,6 +7,8 @@ Controls and monitors RV devices via the Lippert OneControl system:
 - Water pump (ON/OFF with broadcast state tracking)
 - Tank sensors (Fresh, Grey, Black, LP)
 - Leveler buttons (Auto Level, Retract, Cancel)
+
+Config version 2: devices keyed by func_id (stable) instead of counter (volatile).
 """
 from __future__ import annotations
 
@@ -25,8 +27,11 @@ from .const import (
     CONF_PORT,
     DEFAULT_HOST,
     DEFAULT_PORT,
+    CONF_DISCOVERED_LIGHTS,
+    CONF_DISCOVERED_TANKS,
+    CONF_DISCOVERED_WATER_HEATERS,
+    CONF_DISCOVERED_WATER_PUMPS,
     CONF_DISCOVERED_GENERATORS,
-    DEFAULT_GENERATOR_COUNTER,
 )
 from .coordinator import OneControlCoordinator
 
@@ -46,6 +51,53 @@ PLATFORMS: list[Platform] = [
 ]
 
 
+def _migrate_v1_to_v2(data: dict) -> dict:
+    """Migrate V1 config (counter-keyed) to V2 (func_id-keyed).
+
+    V1 format: {"28": {"name": "Bedroom Light", "func_id": 57}}
+    V2 format: {"57": {"name": "Bedroom Light"}}
+    """
+    def _convert(devices: dict) -> dict:
+        new_devices: dict = {}
+        for _counter_hex, info in devices.items():
+            func_id = info.get("func_id")
+            if func_id is not None:
+                # V1 entry with func_id embedded -- migrate
+                new_devices[str(func_id)] = {"name": info["name"]}
+            else:
+                # Already V2 or unknown format -- keep as-is
+                new_devices[_counter_hex] = info
+        return new_devices
+
+    new_data = dict(data)
+    for key in (CONF_DISCOVERED_LIGHTS, CONF_DISCOVERED_TANKS,
+                CONF_DISCOVERED_WATER_HEATERS, CONF_DISCOVERED_WATER_PUMPS,
+                CONF_DISCOVERED_GENERATORS):
+        if key in new_data and new_data[key]:
+            new_data[key] = _convert(new_data[key])
+
+    # Handle legacy has_generator flag
+    if new_data.pop("has_generator", None):
+        if CONF_DISCOVERED_GENERATORS not in new_data or not new_data[CONF_DISCOVERED_GENERATORS]:
+            new_data[CONF_DISCOVERED_GENERATORS] = {"95": {"name": "Generator"}}
+
+    return new_data
+
+
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+    """Migrate old config entry to current version."""
+    if config_entry.version < 2:
+        _LOGGER.info("Migrating OneControl config entry from version %d to 2", config_entry.version)
+        new_data = _migrate_v1_to_v2(dict(config_entry.data))
+        hass.config_entries.async_update_entry(
+            config_entry,
+            data=new_data,
+            version=2,
+        )
+        _LOGGER.info("Migration to V2 (func_id-based) complete")
+    return True
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Lippert OneControl component."""
     _LOGGER.debug("OneControl async_setup called")
@@ -54,13 +106,11 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         """Try to discover OneControl controller."""
         _LOGGER.debug("OneControl discovery starting...")
         
-        # Check if already configured
         for entry in hass.config_entries.async_entries(DOMAIN):
             if entry.data.get(CONF_HOST) == DEFAULT_HOST:
                 _LOGGER.debug("OneControl already configured, skipping discovery")
                 return
 
-        # Try to connect to the default IP
         _LOGGER.debug("Checking for OneControl at %s:%d", DEFAULT_HOST, DEFAULT_PORT)
         try:
             reader, writer = await asyncio.wait_for(
@@ -72,7 +122,6 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             
             _LOGGER.info("OneControl controller discovered at %s:%d!", DEFAULT_HOST, DEFAULT_PORT)
             
-            # Trigger discovery flow
             await hass.config_entries.flow.async_init(
                 DOMAIN,
                 context={"source": SOURCE_INTEGRATION_DISCOVERY},
@@ -81,12 +130,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         except (asyncio.TimeoutError, OSError, ConnectionRefusedError) as err:
             _LOGGER.debug("No OneControl controller found at %s:%d: %s", DEFAULT_HOST, DEFAULT_PORT, err)
 
-    # Wait for HA to fully start, then run discovery
     if hass.is_running:
-        # HA already started, run now
         hass.async_create_task(_async_discover())
     else:
-        # Wait for HA to start
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_discover)
     
     return True
@@ -99,22 +145,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     host = entry.data[CONF_HOST]
     port = entry.data.get(CONF_PORT, DEFAULT_PORT)
 
-    # Create the coordinator
     coordinator = OneControlCoordinator(hass, host, port)
     
-    # Initialize generator counters from discovered generators config
-    # This enables dynamic generator control using discovered counters
+    # Generator presence -- V2 config: generators dict keyed by func_id
     discovered_generators = entry.data.get(CONF_DISCOVERED_GENERATORS, {})
     if discovered_generators:
-        # Convert hex string keys to integers
-        generator_counters = [int(counter_hex, 16) for counter_hex in discovered_generators.keys()]
-        coordinator.init_generator_counters(generator_counters)
-        _LOGGER.debug("Initialized generator counters from config: %s", discovered_generators)
-    elif entry.data.get("has_generator", False):
-        # Backward compatibility: old config with just has_generator flag
-        # Use default counter
-        coordinator.init_generator_counters([DEFAULT_GENERATOR_COUNTER])
-        _LOGGER.debug("Using default generator counter for backward compatibility")
+        coordinator.init_generator()
 
     # Fetch initial data
     await coordinator.async_config_entry_first_refresh()

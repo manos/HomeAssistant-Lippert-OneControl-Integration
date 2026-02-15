@@ -1,6 +1,6 @@
 [project]
 name = "homeassistant-lippert-onecontrol"
-version = "0.2.2"
+version = "0.3.0"
 description = "Home Assistant integration for Lippert OneControl RV systems"
 readme = "README.md"
 license = {text = "MIT"}

@@ -383,41 +383,34 @@ class OneControlClient:
                 except Exception:
                     pass
 
-    async def read_all_sensors(self, duration: float = 3.0, generator_counters: list[int] | None = None) -> dict:
+    async def read_all_sensors(self, duration: float = 3.0) -> dict:
         """
-        Read ALL sensor data in a SINGLE connection.
+        Read ALL sensor data and device registration in a SINGLE connection.
         
-        This is much more efficient than calling individual read methods,
-        which each open separate connections.
-        
-        HYBRID APPROACH for generator status:
-        Generator status frames (05 03) can come from different counters than what
-        gets discovered via 08 02 registration frames. We use a flexible approach:
-        - Accept status from any of the known generator counters
-        - Plus any additional counters passed via generator_counters parameter
+        Also captures 0x08 0x02 registration frames to build a live
+        func_id <-> counter map.  This map is critical: counters are volatile
+        and can change after controller reboots, so every poll cycle
+        refreshes the mapping.
         
         Returns dict with:
         - tanks: {counter: level_percentage}
         - battery_voltage: float | None
         - generator_hours: float | None
         - generator_state: int | None
+        - relay_states: {counter: bool}
+        - device_map: {func_id(int): counter(int)}  -- live registration map
         """
         reader: Optional[asyncio.StreamReader] = None
         writer: Optional[asyncio.StreamWriter] = None
 
-        result = {
+        result: dict = {
             "tanks": {},
             "battery_voltage": None,
             "generator_hours": None,
             "generator_state": None,
-            "relay_states": {},  # counter -> bool (on/off) for latching relays like water heaters
+            "relay_states": {},  # counter -> bool (on/off) for latching relays
+            "device_map": {},    # func_id -> counter (live registration map)
         }
-        
-        # Known generator status counters (hybrid approach)
-        # These are counters where 05 03 generator status frames have been observed
-        known_gen_counters = {0x24, 0x5c, 0x43, 0x87}
-        if generator_counters:
-            known_gen_counters.update(generator_counters)
 
         try:
             reader, writer = await asyncio.wait_for(
@@ -442,21 +435,30 @@ class OneControlClient:
                     data = await asyncio.wait_for(reader.read(8192), timeout=0.5)
                     frames = decode_frames(data)
                     for f in frames:
+                        # Device registration: 08 02 [counter] ... [func_id]
+                        # Builds the live func_id -> counter map
+                        if len(f) >= 9 and f[0] == 0x08 and f[1] == 0x02:
+                            counter = f[2]
+                            func_id = f[8]
+                            if func_id > 0:
+                                result["device_map"][func_id] = counter
+
                         # Tank levels: 01 03 [counter] [level]
-                        if len(f) >= 4 and f[0] == 0x01 and f[1] == 0x03:
+                        elif len(f) >= 4 and f[0] == 0x01 and f[1] == 0x03:
                             counter = f[2]
                             level = f[3]
                             result["tanks"][counter] = level
 
                         # Hour meter: 05 03 80 [uint32 BE seconds] [status]
-                        # MUST come before generator status check to avoid counter 0x80 collision
+                        # MUST come before generator status check to avoid 0x80 collision
                         elif len(f) >= 8 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x80:
                             operating_seconds = int.from_bytes(f[3:7], 'big')
                             result["generator_hours"] = operating_seconds / 3600.0
 
-                        # Generator Genie status: 05 03 [counter] [state] [volt_hi] [volt_lo] ...
-                        # Counter varies by RV - use hybrid approach accepting known counters
-                        elif len(f) >= 6 and f[0] == 0x05 and f[1] == 0x03 and f[2] in known_gen_counters:
+                        # Generator Genie status: 05 03 [counter] [state] [volt_hi] [volt_lo]
+                        # Accept from ANY counter that isn't the hour meter (0x80)
+                        # The coordinator will verify it's a real generator via device_map
+                        elif len(f) >= 6 and f[0] == 0x05 and f[1] == 0x03:
                             result["generator_state"] = f[3]
                             result["battery_voltage"] = f[4] + f[5] / 256.0
 
@@ -465,18 +467,19 @@ class OneControlClient:
                         elif len(f) >= 4 and f[0] == 0x06 and f[1] == 0x03:
                             counter = f[2]
                             status_byte = f[3]
-                            is_on = bool(status_byte & 0x01)  # bit 0 = state
+                            is_on = bool(status_byte & 0x01)
                             result["relay_states"][counter] = is_on
 
                 except asyncio.TimeoutError:
                     continue
 
             _LOGGER.debug(
-                "read_all_sensors: tanks=%d, voltage=%s, hours=%s, state=%s",
+                "read_all_sensors: tanks=%d, voltage=%s, hours=%s, state=%s, device_map=%d entries",
                 len(result["tanks"]),
                 result["battery_voltage"],
                 result["generator_hours"],
                 result["generator_state"],
+                len(result["device_map"]),
             )
             return result
 
@@ -606,31 +609,22 @@ class OneControlClient:
         """
         Discover all devices from controller broadcasts.
         
-        Returns dict with:
-        - lights: {counter_hex: {"name": str, "func_id": int}}
-        - tanks: {counter_hex: {"name": str, "func_id": int}}
-        - water_heaters: {counter_hex: {"name": str, "func_id": int}}
-        - water_pumps: {counter_hex: {"name": str, "func_id": int}}
-        - generators: {counter_hex: {"name": str, "func_id": int}}
+        Returns dict keyed by func_id (the STABLE device identifier):
+        - lights: {func_id_str: {"name": str}}
+        - tanks: {func_id_str: {"name": str}}
+        - water_heaters: {func_id_str: {"name": str}}
+        - water_pumps: {func_id_str: {"name": str}}
+        - generators: {func_id_str: {"name": str}}
         
-        This discovers actual devices present in the RV, not just
-        all possible device types.
+        func_id is permanent (from device firmware). Counters are volatile
+        and resolved at runtime via read_all_sensors() device_map.
         """
-        # func_id classification sets — FUNCTION_NAMES imported from const.py
-        # ONLY include func_ids we are 100% SURE are lights
-        # Removed: 105 (awning motor), 107 (may control water heater)
+        # func_id classification sets
         LIGHT_FUNC_IDS = {32, 33, 41, 48, 49, 50, 57, 58, 59, 63, 122}
         TANK_FUNC_IDS = {67, 68, 69, 70, 71, 176}
         GENERATOR_FUNC_ID = 95
-        
-        # Water heaters - use same protocol as lights (latching relay ON/OFF)
         WATER_HEATER_FUNC_IDS = {3, 4}  # 3=Gas, 4=Electric
-        
-        # Water pump - uses same protocol as lights (latching relay ON/OFF)
         WATER_PUMP_FUNC_ID = 5
-        
-        # Future: Motors that need different handling
-        # MOTOR_FUNC_IDS = {105, 97}  # Awning, Main Slide
 
         reader: Optional[asyncio.StreamReader] = None
         writer: Optional[asyncio.StreamWriter] = None
@@ -665,50 +659,33 @@ class OneControlClient:
                     for f in frames:
                         # 08 02 frames: 08 02 [counter] 00 7d 28 [??] 00 [func_id] ...
                         if len(f) >= 9 and f[0] == 0x08 and f[1] == 0x02:
-                            counter = f[2]
                             func_id = f[8]
-                            
                             if func_id <= 0:
                                 continue
-                                
-                            counter_hex = f"{counter:02x}"
+
+                            fid_str = str(func_id)
                             name = FUNCTION_NAMES.get(func_id, f"Device {func_id}")
                             
                             if func_id in LIGHT_FUNC_IDS:
-                                if counter_hex not in lights:
-                                    lights[counter_hex] = {
-                                        "name": name,
-                                        "func_id": func_id,
-                                    }
-                                    _LOGGER.debug("Discovered light: %s (counter=%s)", name, counter_hex)
+                                if fid_str not in lights:
+                                    lights[fid_str] = {"name": name}
+                                    _LOGGER.debug("Discovered light: %s (func_id=%d)", name, func_id)
                             elif func_id in TANK_FUNC_IDS:
-                                if counter_hex not in tanks:
-                                    tanks[counter_hex] = {
-                                        "name": name,
-                                        "func_id": func_id,
-                                    }
-                                    _LOGGER.debug("Discovered tank: %s (counter=%s)", name, counter_hex)
+                                if fid_str not in tanks:
+                                    tanks[fid_str] = {"name": name}
+                                    _LOGGER.debug("Discovered tank: %s (func_id=%d)", name, func_id)
                             elif func_id in WATER_HEATER_FUNC_IDS:
-                                if counter_hex not in water_heaters:
-                                    water_heaters[counter_hex] = {
-                                        "name": name,
-                                        "func_id": func_id,
-                                    }
-                                    _LOGGER.debug("Discovered water heater: %s (counter=%s)", name, counter_hex)
+                                if fid_str not in water_heaters:
+                                    water_heaters[fid_str] = {"name": name}
+                                    _LOGGER.debug("Discovered water heater: %s (func_id=%d)", name, func_id)
                             elif func_id == WATER_PUMP_FUNC_ID:
-                                if counter_hex not in water_pumps:
-                                    water_pumps[counter_hex] = {
-                                        "name": name,
-                                        "func_id": func_id,
-                                    }
-                                    _LOGGER.debug("Discovered water pump: %s (counter=%s)", name, counter_hex)
+                                if fid_str not in water_pumps:
+                                    water_pumps[fid_str] = {"name": name}
+                                    _LOGGER.debug("Discovered water pump: %s (func_id=%d)", name, func_id)
                             elif func_id == GENERATOR_FUNC_ID:
-                                if counter_hex not in generators:
-                                    generators[counter_hex] = {
-                                        "name": name,
-                                        "func_id": func_id,
-                                    }
-                                    _LOGGER.debug("Discovered generator: %s (counter=%s)", name, counter_hex)
+                                if fid_str not in generators:
+                                    generators[fid_str] = {"name": name}
+                                    _LOGGER.debug("Discovered generator: %s (func_id=%d)", name, func_id)
 
                 except asyncio.TimeoutError:
                     continue

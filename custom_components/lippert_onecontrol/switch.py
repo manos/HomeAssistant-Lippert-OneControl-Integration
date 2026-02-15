@@ -35,39 +35,34 @@ async def async_setup_entry(
 
     # Generator switch - only if generators were discovered
     discovered_generators = entry.data.get(CONF_DISCOVERED_GENERATORS, {})
-    has_generator_legacy = entry.data.get("has_generator", False)  # Backward compat
-    if discovered_generators or has_generator_legacy:
+    if discovered_generators:
+        coordinator.init_generator()
         entities.append(OneControlGeneratorSwitch(coordinator))
-        _LOGGER.debug("Adding generator switch (discovered: %s, legacy: %s)", 
-                     bool(discovered_generators), has_generator_legacy)
+        _LOGGER.debug("Adding generator switch")
 
-    # Water heater switches
+    # Water heater switches -- config keyed by func_id string
     water_heaters = entry.data.get(CONF_DISCOVERED_WATER_HEATERS, {})
-    water_heater_counters = []
-    for counter_hex, info in water_heaters.items():
-        counter = int(counter_hex, 16)
-        water_heater_counters.append(counter)
-        name = info.get("name", f"Water Heater {counter_hex}")
-        func_id = info.get("func_id", 0)
-        entities.append(OneControlWaterHeaterSwitch(coordinator, counter, name, func_id))
+    wh_func_ids = []
+    for fid_str, info in water_heaters.items():
+        func_id = int(fid_str)
+        wh_func_ids.append(func_id)
+        name = info.get("name", f"Water Heater {fid_str}")
+        entities.append(OneControlWaterHeaterSwitch(coordinator, func_id, name))
     
-    # Initialize water heater states
-    if water_heater_counters:
-        coordinator.init_water_heater_states(water_heater_counters)
+    if wh_func_ids:
+        coordinator.init_water_heater_states(wh_func_ids)
 
-    # Water pump switches
+    # Water pump switches -- config keyed by func_id string
     water_pumps = entry.data.get(CONF_DISCOVERED_WATER_PUMPS, {})
-    water_pump_counters = []
-    for counter_hex, info in water_pumps.items():
-        counter = int(counter_hex, 16)
-        water_pump_counters.append(counter)
-        name = info.get("name", f"Water Pump {counter_hex}")
-        func_id = info.get("func_id", 0)
-        entities.append(OneControlWaterPumpSwitch(coordinator, counter, name, func_id))
+    wp_func_ids = []
+    for fid_str, info in water_pumps.items():
+        func_id = int(fid_str)
+        wp_func_ids.append(func_id)
+        name = info.get("name", f"Water Pump {fid_str}")
+        entities.append(OneControlWaterPumpSwitch(coordinator, func_id, name))
     
-    # Initialize water pump states
-    if water_pump_counters:
-        coordinator.init_water_pump_states(water_pump_counters)
+    if wp_func_ids:
+        coordinator.init_water_pump_states(wp_func_ids)
 
     async_add_entities(entities)
 
@@ -76,8 +71,8 @@ class OneControlGeneratorSwitch(CoordinatorEntity[OneControlCoordinator], Switch
     """Representation of Lippert OneControl generator switch."""
 
     _attr_device_class = SwitchDeviceClass.SWITCH
-    _attr_has_entity_name = True  # Append to device name
-    _attr_name = "Power"  # Will show as "Generator Power"
+    _attr_has_entity_name = True
+    _attr_name = "Power"
     _attr_icon = "mdi:engine"
 
     def __init__(self, coordinator: OneControlCoordinator) -> None:
@@ -86,7 +81,6 @@ class OneControlGeneratorSwitch(CoordinatorEntity[OneControlCoordinator], Switch
 
         self._attr_unique_id = "lippert_onecontrol_generator_switch"
 
-        # Generator gets its own device (shared with generator sensors)
         self._attr_device_info = {
             "identifiers": {(DOMAIN, "generator")},
             "name": "Generator",
@@ -104,8 +98,6 @@ class OneControlGeneratorSwitch(CoordinatorEntity[OneControlCoordinator], Switch
         state = self.coordinator.data.generator_state
         if state is None:
             return None
-        # States: 0=Off, 1=Priming, 2=Starting, 3=Running, 4=Stopping
-        # Consider "on" if priming, starting, or running
         return state in (1, 2, 3)
 
     @property
@@ -118,7 +110,6 @@ class OneControlGeneratorSwitch(CoordinatorEntity[OneControlCoordinator], Switch
         _LOGGER.debug("Turning on generator")
         success = await self.coordinator.async_generator_on()
         if success:
-            # Request coordinator refresh to get new state
             await self.coordinator.async_request_refresh()
         else:
             _LOGGER.error("Failed to turn on generator")
@@ -128,7 +119,6 @@ class OneControlGeneratorSwitch(CoordinatorEntity[OneControlCoordinator], Switch
         _LOGGER.debug("Turning off generator")
         success = await self.coordinator.async_generator_off()
         if success:
-            # Request coordinator refresh to get new state
             await self.coordinator.async_request_refresh()
         else:
             _LOGGER.error("Failed to turn off generator")
@@ -138,32 +128,29 @@ class OneControlWaterHeaterSwitch(CoordinatorEntity[OneControlCoordinator], Swit
     """Representation of Lippert OneControl water heater switch."""
 
     _attr_device_class = SwitchDeviceClass.SWITCH
-    _attr_has_entity_name = False  # Use full name directly
+    _attr_has_entity_name = False
 
     def __init__(
         self,
         coordinator: OneControlCoordinator,
-        counter: int,
-        name: str,
         func_id: int,
+        name: str,
     ) -> None:
         """Initialize the water heater switch."""
         super().__init__(coordinator)
 
-        self._counter = counter
         self._func_id = func_id
         self._attr_name = name
-        self._attr_unique_id = f"lippert_onecontrol_water_heater_{counter:02x}"
+        self._attr_unique_id = f"lippert_onecontrol_water_heater_fid{func_id}"
         
-        # Set icon based on type
+        # Icon by func_id
         if func_id == 3:  # Gas water heater
             self._attr_icon = "mdi:water-boiler"
         else:  # Electric water heater (func_id 4)
             self._attr_icon = "mdi:water-boiler-alert"
 
-        # Each water heater gets its own device
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, f"water_heater_{counter:02x}")},
+            "identifiers": {(DOMAIN, f"water_heater_fid{func_id}")},
             "name": name,
             "manufacturer": "Lippert",
             "model": FUNCTION_NAMES.get(func_id, f"Water Heater (func_id {func_id})"),
@@ -174,7 +161,7 @@ class OneControlWaterHeaterSwitch(CoordinatorEntity[OneControlCoordinator], Swit
     @property
     def is_on(self) -> bool | None:
         """Return True if water heater is on."""
-        return self.coordinator.get_water_heater_state(self._counter)
+        return self.coordinator.get_water_heater_state(self._func_id)
 
     @property
     def available(self) -> bool:
@@ -183,48 +170,45 @@ class OneControlWaterHeaterSwitch(CoordinatorEntity[OneControlCoordinator], Swit
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on the water heater."""
-        _LOGGER.debug("Turning on water heater %02X (%s)", self._counter, self._attr_name)
-        success = await self.coordinator.async_turn_water_heater_on(self._counter)
+        _LOGGER.debug("Turning on water heater func_id=%d (%s)", self._func_id, self._attr_name)
+        success = await self.coordinator.async_turn_water_heater_on(self._func_id)
         if success:
             self.async_write_ha_state()
         else:
-            _LOGGER.error("Failed to turn on water heater %02X", self._counter)
+            _LOGGER.error("Failed to turn on water heater func_id=%d", self._func_id)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the water heater."""
-        _LOGGER.debug("Turning off water heater %02X (%s)", self._counter, self._attr_name)
-        success = await self.coordinator.async_turn_water_heater_off(self._counter)
+        _LOGGER.debug("Turning off water heater func_id=%d (%s)", self._func_id, self._attr_name)
+        success = await self.coordinator.async_turn_water_heater_off(self._func_id)
         if success:
             self.async_write_ha_state()
         else:
-            _LOGGER.error("Failed to turn off water heater %02X", self._counter)
+            _LOGGER.error("Failed to turn off water heater func_id=%d", self._func_id)
 
 
 class OneControlWaterPumpSwitch(CoordinatorEntity[OneControlCoordinator], SwitchEntity):
     """Representation of Lippert OneControl water pump switch."""
 
     _attr_device_class = SwitchDeviceClass.SWITCH
-    _attr_has_entity_name = False  # Use full name directly
+    _attr_has_entity_name = False
     _attr_icon = "mdi:water-pump"
 
     def __init__(
         self,
         coordinator: OneControlCoordinator,
-        counter: int,
-        name: str,
         func_id: int,
+        name: str,
     ) -> None:
         """Initialize the water pump switch."""
         super().__init__(coordinator)
 
-        self._counter = counter
         self._func_id = func_id
         self._attr_name = name
-        self._attr_unique_id = f"lippert_onecontrol_water_pump_{counter:02x}"
+        self._attr_unique_id = f"lippert_onecontrol_water_pump_fid{func_id}"
 
-        # Water pump gets its own device
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, f"water_pump_{counter:02x}")},
+            "identifiers": {(DOMAIN, f"water_pump_fid{func_id}")},
             "name": name,
             "manufacturer": "Lippert",
             "model": FUNCTION_NAMES.get(func_id, f"Water Pump (func_id {func_id})"),
@@ -235,7 +219,7 @@ class OneControlWaterPumpSwitch(CoordinatorEntity[OneControlCoordinator], Switch
     @property
     def is_on(self) -> bool | None:
         """Return True if water pump is on."""
-        return self.coordinator.get_water_pump_state(self._counter)
+        return self.coordinator.get_water_pump_state(self._func_id)
 
     @property
     def available(self) -> bool:
@@ -244,18 +228,18 @@ class OneControlWaterPumpSwitch(CoordinatorEntity[OneControlCoordinator], Switch
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on the water pump."""
-        _LOGGER.debug("Turning on water pump %02X (%s)", self._counter, self._attr_name)
-        success = await self.coordinator.async_turn_water_pump_on(self._counter)
+        _LOGGER.debug("Turning on water pump func_id=%d (%s)", self._func_id, self._attr_name)
+        success = await self.coordinator.async_turn_water_pump_on(self._func_id)
         if success:
             self.async_write_ha_state()
         else:
-            _LOGGER.error("Failed to turn on water pump %02X", self._counter)
+            _LOGGER.error("Failed to turn on water pump func_id=%d", self._func_id)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the water pump."""
-        _LOGGER.debug("Turning off water pump %02X (%s)", self._counter, self._attr_name)
-        success = await self.coordinator.async_turn_water_pump_off(self._counter)
+        _LOGGER.debug("Turning off water pump func_id=%d (%s)", self._func_id, self._attr_name)
+        success = await self.coordinator.async_turn_water_pump_off(self._func_id)
         if success:
             self.async_write_ha_state()
         else:
-            _LOGGER.error("Failed to turn off water pump %02X", self._counter)
+            _LOGGER.error("Failed to turn off water pump func_id=%d", self._func_id)

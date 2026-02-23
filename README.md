@@ -156,6 +156,7 @@ The integration automatically discovers devices based on their function ID. Comm
 |-------------|-------------|
 | 3 | Gas Water Heater |
 | 4 | Electric Water Heater |
+| 107 | Water Tank Heater |
 
 ### Water Pump (controllable)
 | Function ID | Device Name |

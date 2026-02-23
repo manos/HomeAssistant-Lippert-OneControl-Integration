@@ -623,7 +623,7 @@ class OneControlClient:
         LIGHT_FUNC_IDS = {32, 33, 41, 48, 49, 50, 57, 58, 59, 63, 122}
         TANK_FUNC_IDS = {67, 68, 69, 70, 71, 176}
         GENERATOR_FUNC_ID = 95
-        WATER_HEATER_FUNC_IDS = {3, 4}  # 3=Gas, 4=Electric
+        WATER_HEATER_FUNC_IDS = {3, 4, 107}  # 3=Gas, 4=Electric, 107=Water Tank Heater
         WATER_PUMP_FUNC_ID = 5
 
         reader: Optional[asyncio.StreamReader] = None

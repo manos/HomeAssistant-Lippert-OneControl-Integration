@@ -96,7 +96,7 @@ The OneControl controller runs on the RV's internal WiFi network:
 - **IP:** `192.168.1.1`
 - **Port:** `6969`
 
-Your Home Assistant instance must be able to reach this IP. 
+Your Home Assistant instance must be able to reach this IP.
 
 ### Recommended: Raspberry Pi Bridge
 
@@ -113,7 +113,7 @@ The easiest way to integrate OneControl with your home network is using a **Rasp
 **Setup:**
 1. Connect Pi's **WiFi** to your RV's OneControl network
 2. Connect Pi's **Ethernet** to your home network (or run HA directly on the Pi)
-3. Enable IP forwarding and set up routing/NAT on the Pi
+3. Enable IP forwarding on the Pi, and tell your network how to reach 192.168.1.1 (static route to the Ethernet interface IP)
 4. Home Assistant can now reach `192.168.1.1` through the Pi
 
 This approach lets Home Assistant stay on your main network while accessing the RV's isolated OneControl system.

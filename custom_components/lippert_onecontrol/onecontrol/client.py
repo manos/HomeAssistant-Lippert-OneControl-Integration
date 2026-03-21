@@ -510,12 +510,9 @@ class OneControlClient:
     async def _control_generator(self, on: bool, counter: int = GENERATOR_COUNTER) -> bool:
         """
         Control the generator (internal implementation).
-        
-        IMPORTANT: Generator uses DIFFERENT protocol than lights!
-        - Protocol: 0x81 (not 0x80)
-        - Control frame type: 0x01 (not 0x00)
-        - ON command: 0x02
-        - OFF command: 0x01
+
+        Generator uses protocol 0x81 and conn 0xE8 (not the universal 0x80/0x40
+        used by lights). These are fixed values, not session-specific.
         """
         reader: Optional[asyncio.StreamReader] = None
         writer: Optional[asyncio.StreamWriter] = None
@@ -545,34 +542,33 @@ class OneControlClient:
             await asyncio.sleep(0.3)
             await recv(0.3)
 
-            # 2. Seed request - Protocol 0x81, device type 42 00 04
+            # 2. Seed request
             await send(bytes([
                 0x02, GENERATOR_PROTOCOL, GENERATOR_CONN, counter,
                 0x42, 0x00, 0x04
             ]))
 
-            # 3. Wait for seed (protocol flag varies: 0x80 or 0x82)
+            # 3. Wait for seed
             seed = None
             for _ in range(10):
                 await asyncio.sleep(0.3)
                 frames = await recv()
                 for f in frames:
-                    # Look for 06 [80|82] ... 42 00 04 [seed]
-                    if len(f) >= 11 and f[0] == 0x06 and f[1] in (0x80, 0x82) and f[4] == 0x42:
+                    if len(f) >= 11 and f[0] == 0x06 and f[4] == 0x42:
                         seed = int.from_bytes(f[7:11], 'big')
                         break
                 if seed:
                     break
 
             if seed is None:
-                _LOGGER.error("Generator: No seed received")
+                _LOGGER.error("Generator: No seed received for counter 0x%02x", counter)
                 return False
 
-            # 4. Compute key
+            # 4. Compute TEA key
             key = tea_encrypt(seed, REMOTE_CONTROL_CYPHER)
             key_bytes = struct.pack('>I', key)
 
-            # 5. Key transmit - device type 43 00 04
+            # 5. Key transmit
             await send(bytes([
                 0x06, GENERATOR_PROTOCOL, GENERATOR_CONN, counter,
                 0x43, 0x00, 0x04
@@ -580,8 +576,7 @@ class OneControlClient:
             await asyncio.sleep(0.2)
             await recv()
 
-            # 6. Control command - Frame type 0x01 (NOT 0x00!)
-            # Commands: 0x02 = ON, 0x01 = OFF
+            # 6. Control command
             cmd = 0x02 if on else 0x01
             ctrl_conn = GENERATOR_CONN + 2
             await send(bytes([

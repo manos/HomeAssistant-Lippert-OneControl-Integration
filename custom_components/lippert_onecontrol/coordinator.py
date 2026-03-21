@@ -68,6 +68,7 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
         self._water_pump_func_ids: set[int] = set()
         self._water_pump_states: dict[int, bool] = {}
         self._has_generator: bool = False
+        self._generator_control_counter: int | None = None
 
     # ---- Initialization (called from platform setup) ----
 
@@ -122,6 +123,13 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
                     "Live device map updated: %d devices",
                     len(self._func_id_to_counter),
                 )
+
+            # Generator has multiple sub-counters for the same func_id (hour meter
+            # vs genie status).  The control counter is the one broadcasting state
+            # + voltage on 05 03 frames, NOT the hour meter (0x80).
+            gen_ctrl = sensor_data.get("generator_control_counter")
+            if gen_ctrl is not None:
+                self._generator_control_counter = gen_ctrl
 
             # Update relay-based device states using reverse map
             relay_states: dict[int, bool] = sensor_data.get("relay_states", {})
@@ -197,11 +205,14 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
     # ---- Generator control ----
 
     async def async_generator_on(self) -> bool:
-        """Turn on the generator, resolving counter at call time."""
-        counter = self.get_counter(GENERATOR_FUNC_ID)
+        """Turn on the generator using the dedicated control counter."""
+        counter = self._generator_control_counter
         if counter is None:
-            _LOGGER.error("No counter mapped for generator (func_id %d)", GENERATOR_FUNC_ID)
+            counter = self.get_counter(GENERATOR_FUNC_ID)
+        if counter is None:
+            _LOGGER.error("No counter for generator (func_id %d)", GENERATOR_FUNC_ID)
             return False
+        _LOGGER.debug("Generator ON using counter 0x%02x", counter)
         try:
             return await self._client.generator_on(counter)
         except Exception as err:
@@ -209,11 +220,14 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
             return False
 
     async def async_generator_off(self) -> bool:
-        """Turn off the generator, resolving counter at call time."""
-        counter = self.get_counter(GENERATOR_FUNC_ID)
+        """Turn off the generator using the dedicated control counter."""
+        counter = self._generator_control_counter
         if counter is None:
-            _LOGGER.error("No counter mapped for generator (func_id %d)", GENERATOR_FUNC_ID)
+            counter = self.get_counter(GENERATOR_FUNC_ID)
+        if counter is None:
+            _LOGGER.error("No counter for generator (func_id %d)", GENERATOR_FUNC_ID)
             return False
+        _LOGGER.debug("Generator OFF using counter 0x%02x", counter)
         try:
             return await self._client.generator_off(counter)
         except Exception as err:

@@ -68,7 +68,7 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
         self._water_pump_func_ids: set[int] = set()
         self._water_pump_states: dict[int, bool] = {}
         self._has_generator: bool = False
-        self._generator_control_counter: int | None = None
+        self._generator_counters: list[int] = []
 
     # ---- Initialization (called from platform setup) ----
 
@@ -124,12 +124,12 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
                     len(self._func_id_to_counter),
                 )
 
-            # Generator has multiple sub-counters for the same func_id (hour meter
-            # vs genie status).  The control counter is the one broadcasting state
-            # + voltage on 05 03 frames, NOT the hour meter (0x80).
-            gen_ctrl = sensor_data.get("generator_control_counter")
-            if gen_ctrl is not None:
-                self._generator_control_counter = gen_ctrl
+            # Generator has multiple sub-counters for the same func_id.
+            # Keep ALL of them so the try-all loop can find the right one.
+            device_map_all: dict[int, list[int]] = sensor_data.get("device_map_all", {})
+            gen_counters = device_map_all.get(GENERATOR_FUNC_ID, [])
+            if gen_counters:
+                self._generator_counters = list(gen_counters)
 
             # Update relay-based device states using reverse map
             relay_states: dict[int, bool] = sensor_data.get("relay_states", {})
@@ -204,35 +204,45 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
 
     # ---- Generator control ----
 
+    def _get_generator_counters_to_try(self) -> list[int]:
+        """Get all generator counters to try, including the hardcoded default."""
+        from .onecontrol.client import GENERATOR_COUNTER
+        counters = list(self._generator_counters)
+        if GENERATOR_COUNTER not in counters:
+            counters.append(GENERATOR_COUNTER)
+        return counters
+
     async def async_generator_on(self) -> bool:
-        """Turn on the generator using the dedicated control counter."""
-        counter = self._generator_control_counter
-        if counter is None:
-            counter = self.get_counter(GENERATOR_FUNC_ID)
-        if counter is None:
-            _LOGGER.error("No counter for generator (func_id %d)", GENERATOR_FUNC_ID)
-            return False
-        _LOGGER.debug("Generator ON using counter 0x%02x", counter)
-        try:
-            return await self._client.generator_on(counter)
-        except Exception as err:
-            _LOGGER.error("Failed to turn on generator: %s", err)
-            return False
+        """Turn on the generator, trying all known counters."""
+        counters = self._get_generator_counters_to_try()
+        for counter in counters:
+            try:
+                _LOGGER.debug("Trying generator ON with counter 0x%02x", counter)
+                if await self._client.generator_on(counter):
+                    return True
+            except Exception as err:
+                _LOGGER.debug("Generator ON failed with counter 0x%02x: %s", counter, err)
+        _LOGGER.error(
+            "Failed to turn on generator (tried counters: %s)",
+            [f"0x{c:02x}" for c in counters],
+        )
+        return False
 
     async def async_generator_off(self) -> bool:
-        """Turn off the generator using the dedicated control counter."""
-        counter = self._generator_control_counter
-        if counter is None:
-            counter = self.get_counter(GENERATOR_FUNC_ID)
-        if counter is None:
-            _LOGGER.error("No counter for generator (func_id %d)", GENERATOR_FUNC_ID)
-            return False
-        _LOGGER.debug("Generator OFF using counter 0x%02x", counter)
-        try:
-            return await self._client.generator_off(counter)
-        except Exception as err:
-            _LOGGER.error("Failed to turn off generator: %s", err)
-            return False
+        """Turn off the generator, trying all known counters."""
+        counters = self._get_generator_counters_to_try()
+        for counter in counters:
+            try:
+                _LOGGER.debug("Trying generator OFF with counter 0x%02x", counter)
+                if await self._client.generator_off(counter):
+                    return True
+            except Exception as err:
+                _LOGGER.debug("Generator OFF failed with counter 0x%02x: %s", counter, err)
+        _LOGGER.error(
+            "Failed to turn off generator (tried counters: %s)",
+            [f"0x{c:02x}" for c in counters],
+        )
+        return False
 
     def get_generator_state(self) -> int | None:
         """Get the current generator state."""

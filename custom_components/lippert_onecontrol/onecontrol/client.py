@@ -408,9 +408,9 @@ class OneControlClient:
             "battery_voltage": None,
             "generator_hours": None,
             "generator_state": None,
-            "generator_control_counter": None,  # from 05 03 status broadcast (NOT the hour meter)
             "relay_states": {},  # counter -> bool (on/off) for latching relays
-            "device_map": {},    # func_id -> counter (live registration map)
+            "device_map": {},    # func_id -> counter (live registration map, last-wins)
+            "device_map_all": {},  # func_id -> list[counter] (all counters seen per func_id)
         }
 
         try:
@@ -443,6 +443,10 @@ class OneControlClient:
                             func_id = f[8]
                             if func_id > 0:
                                 result["device_map"][func_id] = counter
+                                if func_id not in result["device_map_all"]:
+                                    result["device_map_all"][func_id] = []
+                                if counter not in result["device_map_all"][func_id]:
+                                    result["device_map_all"][func_id].append(counter)
 
                         # Tank levels: 01 03 [counter] [level]
                         elif len(f) >= 4 and f[0] == 0x01 and f[1] == 0x03:
@@ -458,11 +462,9 @@ class OneControlClient:
 
                         # Generator Genie status: 05 03 [counter] [state] [volt_hi] [volt_lo]
                         # Accept from ANY counter that isn't the hour meter (0x80)
-                        # This counter is the one that accepts control commands
                         elif len(f) >= 6 and f[0] == 0x05 and f[1] == 0x03:
                             result["generator_state"] = f[3]
                             result["battery_voltage"] = f[4] + f[5] / 256.0
-                            result["generator_control_counter"] = f[2]
 
                         # RelayBasicLatchingStatus2: 06 03 [counter] [status] ...
                         # Status byte bit 0 = on/off state

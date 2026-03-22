@@ -454,17 +454,15 @@ class OneControlClient:
                             level = f[3]
                             result["tanks"][counter] = level
 
-                        # Hour meter: 05 03 80 [uint32 BE seconds] [status]
-                        # MUST come before generator status check to avoid 0x80 collision
-                        elif len(f) >= 8 and f[0] == 0x05 and f[1] == 0x03 and f[2] == 0x80:
-                            operating_seconds = int.from_bytes(f[3:7], 'big')
-                            result["generator_hours"] = operating_seconds / 3600.0
-
-                        # Generator Genie status: 05 03 [counter] [state] [volt_hi] [volt_lo]
-                        # Accept from ANY counter that isn't the hour meter (0x80)
-                        elif len(f) >= 6 and f[0] == 0x05 and f[1] == 0x03:
-                            result["generator_state"] = f[3]
-                            result["battery_voltage"] = f[4] + f[5] / 256.0
+                        # Generator 05 03 frames: hour meter OR genie status.
+                        # f[7] distinguishes: 0x01 = hour meter, 0x00 = status.
+                        elif len(f) >= 8 and f[0] == 0x05 and f[1] == 0x03:
+                            if f[7] == 0x01:
+                                operating_seconds = int.from_bytes(f[3:7], 'big')
+                                result["generator_hours"] = operating_seconds / 3600.0
+                            else:
+                                result["generator_state"] = f[3]
+                                result["battery_voltage"] = f[4] + f[5] / 256.0
 
                         # RelayBasicLatchingStatus2: 06 03 [counter] [status] ...
                         # Status byte bit 0 = on/off state

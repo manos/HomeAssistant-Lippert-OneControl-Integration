@@ -69,6 +69,8 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
         self._water_pump_states: dict[int, bool] = {}
         self._has_generator: bool = False
         self._generator_counters: list[int] = []
+        self._last_generator_hours: float | None = None
+        self._last_battery_voltage: float | None = None
 
     # ---- Initialization (called from platform setup) ----
 
@@ -151,13 +153,20 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
                 if func_id is not None:
                     tanks_by_func_id[func_id] = level
 
+            gen_hours = sensor_data.get("generator_hours")
+            if gen_hours is not None:
+                self._last_generator_hours = gen_hours
+            bat_voltage = sensor_data.get("battery_voltage")
+            if bat_voltage is not None:
+                self._last_battery_voltage = bat_voltage
+
             return OneControlData(
                 lights=self._light_states.copy(),
                 tanks=tanks_by_func_id,
                 water_heaters=self._water_heater_states.copy(),
                 water_pumps=self._water_pump_states.copy(),
-                battery_voltage=sensor_data.get("battery_voltage"),
-                generator_hours=sensor_data.get("generator_hours"),
+                battery_voltage=self._last_battery_voltage,
+                generator_hours=self._last_generator_hours,
                 generator_state=sensor_data.get("generator_state"),
             )
 

@@ -37,9 +37,6 @@ UNIVERSAL_CONN = 0x40
 UNIVERSAL_DEVICE = 0x04
 
 # Generator-specific constants (uses different protocol!)
-# Counter varies by RV installation - discovered dynamically at config time.
-# This value is only used as a fallback default in function signatures.
-GENERATOR_COUNTER = 0x24
 GENERATOR_PROTOCOL = 0x81
 GENERATOR_CONN = 0xe8
 
@@ -410,7 +407,7 @@ class OneControlClient:
             "generator_state": None,
             "relay_states": {},  # counter -> bool (on/off) for latching relays
             "device_map": {},    # func_id -> counter (live registration map, last-wins)
-            "device_map_all": {},  # func_id -> list[counter] (all counters seen per func_id)
+            "generator_status_counter": None,
         }
 
         try:
@@ -443,10 +440,6 @@ class OneControlClient:
                             func_id = f[8]
                             if func_id > 0:
                                 result["device_map"][func_id] = counter
-                                if func_id not in result["device_map_all"]:
-                                    result["device_map_all"][func_id] = []
-                                if counter not in result["device_map_all"][func_id]:
-                                    result["device_map_all"][func_id].append(counter)
 
                         # Tank levels: 01 03 [counter] [level]
                         elif len(f) >= 4 and f[0] == 0x01 and f[1] == 0x03:
@@ -455,14 +448,17 @@ class OneControlClient:
                             result["tanks"][counter] = level
 
                         # Generator 05 03 frames: hour meter OR genie status.
-                        # f[7] distinguishes: 0x01 = hour meter, 0x00 = status.
+                        # Status frames always have f[6]=0x80 (flags byte).
+                        # Hour meter has the seconds counter at f[3:7], so f[6]
+                        # varies as the low byte of operating seconds.
                         elif len(f) >= 8 and f[0] == 0x05 and f[1] == 0x03:
-                            if f[7] == 0x01:
-                                operating_seconds = int.from_bytes(f[3:7], 'big')
-                                result["generator_hours"] = operating_seconds / 3600.0
-                            else:
+                            if f[6] == 0x80:
                                 result["generator_state"] = f[3]
                                 result["battery_voltage"] = f[4] + f[5] / 256.0
+                                result["generator_status_counter"] = f[2]
+                            else:
+                                operating_seconds = int.from_bytes(f[3:7], 'big')
+                                result["generator_hours"] = operating_seconds / 3600.0
 
                         # RelayBasicLatchingStatus2: 06 03 [counter] [status] ...
                         # Status byte bit 0 = on/off state
@@ -497,20 +493,20 @@ class OneControlClient:
                 except Exception:
                     pass
 
-    async def generator_on(self, counter: int = GENERATOR_COUNTER) -> bool:
+    async def generator_on(self) -> bool:
         """Turn on the generator."""
-        return await self._control_generator(on=True, counter=counter)
+        return await self._control_generator(on=True)
 
-    async def generator_off(self, counter: int = GENERATOR_COUNTER) -> bool:
+    async def generator_off(self) -> bool:
         """Turn off the generator."""
-        return await self._control_generator(on=False, counter=counter)
+        return await self._control_generator(on=False)
 
-    async def _control_generator(self, on: bool, counter: int = GENERATOR_COUNTER) -> bool:
-        """
-        Control the generator (internal implementation).
+    async def _control_generator(self, on: bool) -> bool:
+        """Control the generator.
 
-        Generator uses protocol 0x81 and conn 0xE8 (not the universal 0x80/0x40
-        used by lights). These are fixed values, not session-specific.
+        Self-contained: discovers the correct counter from live 05 03
+        broadcasts (status frame has f[6]==0x80), then authenticates and
+        sends the control command.  No cached counters needed.
         """
         reader: Optional[asyncio.StreamReader] = None
         writer: Optional[asyncio.StreamWriter] = None
@@ -532,21 +528,39 @@ class OneControlClient:
                 except asyncio.TimeoutError:
                     return []
 
-            # 1. Register
+            # 1. Register so the controller starts sending us broadcasts
             session = 0x7a
             await send(bytes([0x01, 0x06, session, 0x00]))
             await asyncio.sleep(0.1)
             await send(bytes([0x08, 0x00, session, 0x00]) + DEFAULT_UUID)
-            await asyncio.sleep(0.3)
-            await recv(0.3)
 
-            # 2. Seed request
+            # 2. Discover the generator status counter from live broadcasts.
+            #    The status frame is 05 03 [counter] ... with f[6]==0x80.
+            counter = None
+            for _ in range(20):
+                await asyncio.sleep(0.2)
+                frames = await recv(0.5)
+                for f in frames:
+                    if (len(f) >= 8 and f[0] == 0x05 and f[1] == 0x03
+                            and f[6] == 0x80):
+                        counter = f[2]
+                        break
+                if counter is not None:
+                    break
+
+            if counter is None:
+                _LOGGER.error("Generator: no status broadcast found")
+                return False
+
+            _LOGGER.debug("Generator: using counter 0x%02x from live broadcast", counter)
+
+            # 3. Seed request
             await send(bytes([
                 0x02, GENERATOR_PROTOCOL, GENERATOR_CONN, counter,
                 0x42, 0x00, 0x04
             ]))
 
-            # 3. Wait for seed
+            # 4. Wait for seed
             seed = None
             for _ in range(10):
                 await asyncio.sleep(0.3)
@@ -559,14 +573,14 @@ class OneControlClient:
                     break
 
             if seed is None:
-                _LOGGER.error("Generator: No seed received for counter 0x%02x", counter)
+                _LOGGER.error("Generator: no seed received for counter 0x%02x", counter)
                 return False
 
-            # 4. Compute TEA key
+            # 5. Compute TEA key
             key = tea_encrypt(seed, REMOTE_CONTROL_CYPHER)
             key_bytes = struct.pack('>I', key)
 
-            # 5. Key transmit
+            # 6. Key transmit
             await send(bytes([
                 0x06, GENERATOR_PROTOCOL, GENERATOR_CONN, counter,
                 0x43, 0x00, 0x04
@@ -574,7 +588,7 @@ class OneControlClient:
             await asyncio.sleep(0.2)
             await recv()
 
-            # 6. Control command
+            # 7. Control command
             cmd = 0x02 if on else 0x01
             ctrl_conn = GENERATOR_CONN + 2
             await send(bytes([
@@ -584,7 +598,7 @@ class OneControlClient:
             await asyncio.sleep(0.3)
             await recv()
 
-            _LOGGER.debug("Generator turned %s", "ON" if on else "OFF")
+            _LOGGER.debug("Generator turned %s (counter 0x%02x)", "ON" if on else "OFF", counter)
             return True
 
         except asyncio.TimeoutError:

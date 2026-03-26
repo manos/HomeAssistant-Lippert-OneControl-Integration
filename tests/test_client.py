@@ -112,6 +112,7 @@ class TestSensorReading:
         "battery_voltage": None,
         "generator_hours": None,
         "generator_state": None,
+        "generator_status_counter": None,
         "relay_states": {},
         "device_map": {},
     }

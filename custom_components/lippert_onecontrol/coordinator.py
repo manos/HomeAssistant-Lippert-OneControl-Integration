@@ -6,7 +6,6 @@ resolved at runtime from 0x08 0x02 registration broadcasts.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -15,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN, SCAN_INTERVAL
-from .onecontrol import OneControlClient
+from .onecontrol import OneControlClient, OneControlConnectionError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -158,10 +157,12 @@ class OneControlCoordinator(DataUpdateCoordinator[OneControlData]):
                 generator_state=sensor_data.get("generator_state"),
             )
 
-        except asyncio.TimeoutError as err:
-            raise UpdateFailed(f"Timeout communicating with OneControl: {err}") from err
+        except OneControlConnectionError as err:
+            raise UpdateFailed(str(err)) from err
         except Exception as err:
-            raise UpdateFailed(f"Error communicating with OneControl: {err}") from err
+            raise UpdateFailed(
+                f"Error communicating with OneControl: {type(err).__name__}: {err}"
+            ) from err
 
     # ---- Light control (by func_id) ----
 

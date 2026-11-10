@@ -10,6 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "custom_components" / "lippert_onecontrol"))
 from onecontrol.client import (
     OneControlClient,
+    OneControlConnectionError,
     REMOTE_CONTROL_CYPHER,
     DEFAULT_UUID,
     UNIVERSAL_PROTOCOL,
@@ -105,45 +106,41 @@ class TestLightControl:
 class TestSensorReading:
     """Tests for read_all_sensors (the unified sensor reader)."""
 
-    # On connection failure, read_all_sensors returns the initial result dict
-    # with None/empty values rather than raising.
-    EMPTY_RESULT = {
-        "tanks": {},
-        "battery_voltage": None,
-        "generator_hours": None,
-        "generator_state": None,
-        "generator_status_counter": None,
-        "relay_states": {},
-        "device_map": {},
-    }
+    # An unreachable controller must raise, so the coordinator marks the
+    # update failed and entities go unavailable instead of silently "unknown".
 
     @pytest.mark.asyncio
-    async def test_read_all_sensors_connection_failure(self):
-        """Test read_all_sensors returns defaults on connection failure."""
+    async def test_read_all_sensors_connection_failure_raises(self):
+        """A refused connection surfaces as OneControlConnectionError."""
         client = OneControlClient("192.168.1.1")
 
         with patch("asyncio.open_connection", side_effect=ConnectionRefusedError):
-            result = await client.read_all_sensors()
-            assert result == self.EMPTY_RESULT
+            with pytest.raises(OneControlConnectionError):
+                await client.read_all_sensors()
 
     @pytest.mark.asyncio
-    async def test_read_all_sensors_timeout(self):
-        """Test read_all_sensors returns defaults on timeout."""
+    async def test_read_all_sensors_timeout_names_the_error(self):
+        """A timeout has an empty str(); the raised message must still say what happened."""
         client = OneControlClient("192.168.1.1")
 
         with patch("asyncio.open_connection", side_effect=asyncio.TimeoutError):
-            result = await client.read_all_sensors()
-            assert result == self.EMPTY_RESULT
+            with pytest.raises(OneControlConnectionError) as excinfo:
+                await client.read_all_sensors()
+
+        message = str(excinfo.value)
+        assert "TimeoutError" in message
+        assert "192.168.1.1:6969" in message
 
     @pytest.mark.asyncio
-    async def test_read_all_sensors_has_device_map_key(self):
-        """Test read_all_sensors result always includes device_map."""
+    async def test_read_all_sensors_error_includes_os_error_detail(self):
+        """An OSError's detail (e.g. host unreachable) is kept in the message."""
         client = OneControlClient("192.168.1.1")
 
-        with patch("asyncio.open_connection", side_effect=ConnectionRefusedError):
-            result = await client.read_all_sensors()
-            assert "device_map" in result
-            assert isinstance(result["device_map"], dict)
+        with patch("asyncio.open_connection", side_effect=OSError(113, "No route to host")):
+            with pytest.raises(OneControlConnectionError) as excinfo:
+                await client.read_all_sensors()
+
+        assert "No route to host" in str(excinfo.value)
 
 
 class TestTEAAuthentication:

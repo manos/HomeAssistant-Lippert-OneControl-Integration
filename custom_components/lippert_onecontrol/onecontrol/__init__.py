@@ -1,5 +1,5 @@
 """OneControl protocol client for Lippert RV systems."""
-from .client import OneControlClient
+from .client import OneControlClient, OneControlConnectionError
 from .protocol import (
     cobs_encode,
     cobs_decode_single,
@@ -10,6 +10,7 @@ from .protocol import (
 
 __all__ = [
     "OneControlClient",
+    "OneControlConnectionError",
     "cobs_encode",
     "cobs_decode_single",
     "decode_frames",

@@ -24,6 +24,11 @@ from .protocol import cobs_encode, decode_frames, tea_encrypt
 
 _LOGGER = logging.getLogger(__name__)
 
+
+class OneControlConnectionError(Exception):
+    """The OneControl controller could not be reached or read."""
+
+
 # TEA cipher constant for REMOTE_CONTROL
 REMOTE_CONTROL_CYPHER = 0xB16B00B5
 
@@ -396,6 +401,9 @@ class OneControlClient:
         - generator_state: int | None
         - relay_states: {counter: bool}
         - device_map: {func_id(int): counter(int)}  -- live registration map
+
+        Raises OneControlConnectionError when the controller cannot be reached
+        or the read fails, so callers can mark the data unavailable.
         """
         reader: Optional[asyncio.StreamReader] = None
         writer: Optional[asyncio.StreamWriter] = None
@@ -482,8 +490,12 @@ class OneControlClient:
             return result
 
         except Exception as err:
-            _LOGGER.error("Error reading sensors: %s", err)
-            return result
+            # Some errors (asyncio.TimeoutError) have an empty str(), so always
+            # lead with the exception type.
+            detail = f"{type(err).__name__}: {err}" if str(err) else type(err).__name__
+            raise OneControlConnectionError(
+                f"Cannot read sensors from {self.host}:{self.port} ({detail})"
+            ) from err
 
         finally:
             if writer:

@@ -30,7 +30,8 @@ FUNCTION_NAMES: dict[int, str] = {
     # MOTORS / OTHER — require special handling, NOT lights
     105: "Awning",  # Awning MOTOR (extend/retract)
     107: "Water Tank Heater",  # Heating pad under fresh tank (latching relay, same as lights)
-    88: "Landing Gear",  # Leveler
+    88: "Landing Gear",
+    109: "Leveler",  # Hydraulic leveler (4-point, func_id from live captures)
     89: "Front Stabilizer",
     90: "Rear Stabilizer",
     96: "Vent Cover",
